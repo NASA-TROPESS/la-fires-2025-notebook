@@ -14,14 +14,16 @@ function tropomi_no2_config(prior_file)
         latcorn_var="PRODUCT/SUPPORT_DATA/GEOLOCATIONS/latitude_bounds",
         keep_if_gt=Dict("PRODUCT/qa_value" => 0.5),
         vars_to_grid=Dict(
-            "time" => get_tropomi_time,
-            "lon" => "PRODUCT/longitude",
-            "lat" => "PRODUCT/latitude",
             "no2_trop" => "PRODUCT/nitrogendioxide_tropospheric_column",
             "no2_trop_err" => "PRODUCT/nitrogendioxide_tropospheric_column_precision",
             "surface_pressure" => "PRODUCT/SUPPORT_DATA/INPUT_DATA/surface_pressure",
             "layer_pressure" => get_tropomi_layer_pressures,
             "no2_ak" => "PRODUCT/averaging_kernel",
+        ),
+        extra_vars=Dict(
+            "time" => get_tropomi_time,
+            "lon" => "PRODUCT/longitude",
+            "lat" => "PRODUCT/latitude",
         ),
         extra_data_fxn=(data) -> sample_no2_prior_data(data, prior_file)
     )
@@ -50,15 +52,14 @@ end
 
 
 function sample_no2_prior_data(pixel_data::PixelData, prior_file)
-    npix = size(pixel_data.loncorn, 1)
-    pix_lon = pop!(pixel_data.data_to_grid, "lon")
-    pix_lat = pop!(pixel_data.data_to_grid, "lat")
-    pix_time = pop!(pixel_data.data_to_grid, "time")
+    pix_lon = pixel_data.extra_data["lon"]
+    pix_lat = pixel_data.extra_data["lat"]
+    pix_time = pixel_data.extra_data["time"]
 
     prior_data = load_no2_priors(prior_file)
 
     for (key, value) in prior_data.data
-        pixel_data.data_to_grid["prior_$key"] = interp_profiles_to_pixels(
+        this_interp_arr = interp_profiles_to_pixels(
             value,
             prior_data.lon,
             prior_data.lat,
@@ -67,6 +68,9 @@ function sample_no2_prior_data(pixel_data::PixelData, prior_file)
             pix_lat,
             pix_time,
         )
+        println("pixel_data.data_to_grid is $(typeof(pixel_data.data_to_grid))")
+        println("this_interp_arr is $(typeof(this_interp_arr))")
+        pixel_data.data_to_grid["prior_$key"] = this_interp_arr
     end
 
     return pixel_data
