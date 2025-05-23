@@ -68,8 +68,6 @@ function sample_no2_prior_data(pixel_data::PixelData, prior_file)
             pix_lat,
             pix_time,
         )
-        println("pixel_data.data_to_grid is $(typeof(pixel_data.data_to_grid))")
-        println("this_interp_arr is $(typeof(this_interp_arr))")
         pixel_data.data_to_grid["prior_$key"] = this_interp_arr
     end
 

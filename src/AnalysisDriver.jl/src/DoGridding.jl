@@ -1,9 +1,20 @@
 module gridding_driver
 
+using AnalysisDriver
 using Dates
 using JSON3
 using Mustache
 using OversampledGridding
+
+function grid_no2_scene_from_config(; scene_dict, l2_dir, grid_dir, grid_res=0.025, debug_level=0)
+    scene_name = scene_dict["name"]
+    l2_json_file = joinpath(l2_dir, "no2", "$(scene_name)_download_parameters.json")
+    prior_json_file = joinpath(l2_dir, "no2_prior", "$(scene_name)_download_parameters.json")
+    output_dir = joinpath(grid_dir, "no2")
+    mkpath(output_dir)
+    output_template = joinpath(output_dir, "gridded_no2_$(scene_name)_{{Date}}.nc")
+    grid_no2_scene(l2_json_file=l2_json_file, prior_json_file=prior_json_file, output_template=output_template, grid_res=grid_res, debug_level=debug_level)
+end
 
 
 function grid_no2_scene(; l2_json_file, prior_json_file, output_template, grid_res=0.025, debug_level=0)
@@ -29,6 +40,16 @@ function grid_no2_scene(; l2_json_file, prior_json_file, output_template, grid_r
             grid_scene_for_date(files, date_config, grid_latlim, grid_lonlim, output_file; grid_res=grid_res, debug_level=debug_level)
         end
     end
+end
+
+
+function grid_co_scene_from_config(; scene_dict, l2_dir, grid_dir, grid_res=0.025, debug_level=0)
+    scene_name = scene_dict["name"]
+    l2_json_file = joinpath(l2_dir, "co", "$(scene_name)_download_parameters.json")
+    output_dir = joinpath(grid_dir, "co")
+    mkpath(output_dir)
+    output_template = joinpath(output_dir, "gridded_co_$(scene_name)_{{Date}}.nc")
+    grid_co_scene(l2_json_file=l2_json_file, output_template=output_template, grid_res=grid_res, debug_level=debug_level)
 end
 
 function grid_co_scene(; l2_json_file, output_template, grid_res=0.025, debug_level=0)
@@ -66,7 +87,7 @@ function grid_scene_for_date(files, grid_config, grid_latlim, grid_lonlim, outpu
     )
 
     write_grid_data(output_file, gridded_data)
-    println("Wrote $output_file")
+    @info "Wrote $output_file"
 end
 
 function group_tropomi_files_by_start_date(tropomi_files, parent=nothing)
