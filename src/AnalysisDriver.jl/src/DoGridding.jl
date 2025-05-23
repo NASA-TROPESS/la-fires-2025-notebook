@@ -111,21 +111,7 @@ end
 
 
 function grid_update_required(json_scene_file, l2_files, output_file)
-    if !isfile(output_file)
-        @info "Grid output file $output_file does not exist, must create"
-        return true
-    end
-
-    output_mtime = mtime(output_file)
-    for file in [json_scene_file, l2_files...]
-        input_mtime = mtime(output_file)
-        if input_mtime > output_mtime
-            @info "Input file $file is newer than $output_file, must recreate output file"
-            return true
-        end
-    end
-    @info "Gridded output file $output_file is newer than all inputs, no need to recreate"
-    return false
+    return AnalysisDriver.utils.check_mtime(output_file, [json_scene_file, l2_files...])
 end
 
 function grid_def_from_scene(scene_dict, grid_res)

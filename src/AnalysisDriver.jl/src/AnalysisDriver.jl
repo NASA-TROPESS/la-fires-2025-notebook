@@ -3,9 +3,11 @@ module AnalysisDriver
 using PythonCall
 using TOML
 
+include("Utils.jl")
 include("TropomiNO2.jl")
 include("TropomiCO.jl")
 include("DoGridding.jl")
+include("Plotting.jl")
 
 function end2end_driver(config_file, full_recheck=false, force_rerun=false, debug_level=0)
     pyssd = pyimport("sat_scene_download")
@@ -14,6 +16,7 @@ function end2end_driver(config_file, full_recheck=false, force_rerun=false, debu
 
     l2_dir = cfg["files"]["l2_dir"]
     grid_dir = cfg["files"]["grid_dir"]
+    plot_dir = cfg["files"]["plot_dir"]
     for scene in cfg["scene"]
         gridding_driver.grid_no2_scene_from_config(
             scene_dict=scene,
@@ -28,6 +31,12 @@ function end2end_driver(config_file, full_recheck=false, force_rerun=false, debu
             debug_level=debug_level
         )
     end
+
+    plotting.plot_gridded_files(
+        cfg["scene"],
+        grid_dir,
+        plot_dir,
+    )
 end
 
 function load_config_file(config_file)
