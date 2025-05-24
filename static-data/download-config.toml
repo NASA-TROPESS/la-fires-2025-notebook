@@ -1,0 +1,40 @@
+[files]
+l2_dir = "tropomi/l2/"
+grid_dir = "tropomi/gridded/"
+plot_dir = "tropomi/plots/"
+
+[defaults]
+box_width = 10.0
+
+[products.no2]
+provider = "earthaccess"
+filters = { short_name = "S5P_L2__NO2____HiR" }
+
+[products.co]
+provider = "earthaccess"
+filters = { short_name = "S5P_L2__CO_____HiR" }
+
+[products.no2_prior]
+provider = "eodata"
+filters = { Prefix = "Sentinel-5P/AUX/AUX_CTMANA/{date:%Y}/{date:%m}/{date:%d}/" }
+subset_vars = ["lon", "lat", "date", "hyam", "hyai", "hybm", "hybi", "ps", "no2"]
+
+
+[[scene]]
+name = 'eaton_and_palisades'
+start = "2025-01-06"
+end = "2025-01-10"
+lat = 35.0
+lon = -119.5
+lonwidth = 11.0
+latwidth = 10.0
+
+[[scene]]
+name = 'carr_whaleback_and_perry'
+start = "2018-07-20"
+end = "2018-08-07"
+lat = 40.0
+lon = -121.1
+lonwidth = 11.0
+latwidth = 10.0
+
