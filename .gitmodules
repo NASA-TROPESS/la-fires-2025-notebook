@@ -1,0 +1,6 @@
+[submodule "src/sat-scene-download"]
+	path = src/sat-scene-download
+	url = ../sat-scene-download
+[submodule "src/OversampledGridding.jl"]
+	path = src/OversampledGridding.jl
+	url = ../OversampledGridding.jl.git
