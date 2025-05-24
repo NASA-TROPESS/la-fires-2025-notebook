@@ -15,7 +15,7 @@ provider = "earthaccess"
 filters = { short_name = "S5P_L2__CO_____HiR" }
 
 [products.no2_prior]
-provider = "eodata"
+provider = "tropomi-priors-eodata"
 filters = { Prefix = "Sentinel-5P/AUX/AUX_CTMANA/{date:%Y}/{date:%m}/{date:%d}/" }
 subset_vars = ["lon", "lat", "date", "hyam", "hyai", "hybm", "hybi", "ps", "no2"]
 
