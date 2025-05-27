@@ -30,7 +30,7 @@ function grid_no2_scene(; l2_json_file, prior_json_file, output_template, grid_r
     for (date, files) in l2_files_by_date
         prior_files = prior_files_by_date[date]
         if length(prior_files) != 1
-            error("Not implemented: expected one prior file for $date, got $(length(prior_files))")
+            error("Not implemented: expected one prior file for $date, got $(length(prior_files)): $(prior_files)")
         end
         date_config = AnalysisDriver.tropomi_no2.tropomi_no2_config(prior_files[1])
         dstr = Dates.format(date, dateformat"yyyymmdd")

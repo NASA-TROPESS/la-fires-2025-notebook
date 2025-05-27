@@ -19,6 +19,8 @@ function tropomi_no2_config(prior_file)
             "surface_pressure" => "PRODUCT/SUPPORT_DATA/INPUT_DATA/surface_pressure",
             "layer_pressure" => get_tropomi_layer_pressures,
             "no2_ak" => "PRODUCT/averaging_kernel",
+            "no2_amf_trop" => "PRODUCT/air_mass_factor_troposphere",
+            "no2_amf_tot" => "PRODUCT/air_mass_factor_total"
         ),
         extra_vars=Dict(
             "time" => get_tropomi_time,

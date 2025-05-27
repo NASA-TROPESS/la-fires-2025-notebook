@@ -394,7 +394,7 @@ version = "1.8.0"
 
 [[deps.OversampledGridding]]
 deps = ["ArgParse", "Missings", "Mustache", "NCDatasets", "TOML"]
-path = "/Users/laughner/Projects/TROPESS/fire-analysis-2025/src/OversampledGridding.jl"
+path = "../OversampledGridding.jl"
 uuid = "05b4ed27-2021-48ca-97aa-10541206f412"
 version = "0.1.0"
 
