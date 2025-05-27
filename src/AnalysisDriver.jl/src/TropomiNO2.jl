@@ -25,6 +25,7 @@ function tropomi_no2_config(prior_file)
             "lon" => "PRODUCT/longitude",
             "lat" => "PRODUCT/latitude",
         ),
+        extra_data_init_fxn=() -> no2_prior_data_init_fxn(prior_file),
         extra_data_fxn=(data) -> sample_no2_prior_data(data, prior_file)
     )
 end
@@ -49,6 +50,14 @@ function get_tropomi_layer_pressures(ds)
     return p, (dims..., "layer")
 end
 
+
+function no2_prior_data_init_fxn(prior_file)
+    Dataset(prior_file) do ds
+        nmid = ds.dim["lev"]
+        nint = ds.dim["levi"]
+        Dict("prior_no2" => [nmid], "prior_pmid" => [nmid], "prior_pedge" => [nint])
+    end
+end
 
 
 function sample_no2_prior_data(pixel_data::PixelData, prior_file)
