@@ -7,7 +7,5 @@ dependencies:
   - earthaccess
   - matplotlib
   - python=3.13
-  - pip:
-    - sat-scene-download==0.1.0
 
 prefix: "/Users/laughner/Documents/Projects/TROPESS/fire-analysis-2025/.mambaenv"
