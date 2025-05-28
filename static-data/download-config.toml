@@ -11,8 +11,10 @@ provider = "earthaccess"
 filters = { short_name = "S5P_L2__NO2____HiR" }
 
 [products.co]
+# Must specify version, or we get both the v1 and v2 CO products,
+# and v1 doesn't include the a priori
 provider = "earthaccess"
-filters = { short_name = "S5P_L2__CO_____HiR" }
+filters = { short_name = "S5P_L2__CO_____HiR", version = "2" }
 
 [products.no2_prior]
 provider = "tropomi-priors-eodata"
