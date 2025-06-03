@@ -21,6 +21,9 @@ provider = "tropomi-priors-eodata"
 filters = { Prefix = "Sentinel-5P/AUX/AUX_CTMANA/{date:%Y}/{date:%m}/{date:%d}/" }
 subset_vars = ["lon", "lat", "date", "hyam", "hyai", "hybm", "hybi", "ps", "no2"]
 
+[products.goes_fire]
+provider = "goes-s3fs"
+hour_path_template = "noaa-goes16/ABI-L2-FDCC/{date:%Y}/{date:%j}/{date:%H}/"
 
 [[scene]]
 name = 'eaton_and_palisades'
