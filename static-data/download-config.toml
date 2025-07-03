@@ -2,6 +2,7 @@
 l2_dir = "tropomi/l2/"
 grid_dir = "tropomi/gridded/"
 plot_dir = "tropomi/plots/"
+enhancement_dir = "tropomi/enhancements/"
 
 [defaults]
 box_width = 10.0
@@ -11,20 +12,31 @@ box_width = 10.0
 provider = "earthaccess"
 filters = { short_name = "S5P_L2__NO2____HiR", version = "2" }
 
+
 [products.co]
 # Must specify version, or we get both the v1 and v2 CO products,
 # and v1 doesn't include the a priori
 provider = "earthaccess"
 filters = { short_name = "S5P_L2__CO_____HiR", version = "2" }
 
+
 [products.no2_prior]
 provider = "tropomi-priors-eodata"
 filters = { Prefix = "Sentinel-5P/AUX/AUX_CTMANA/{date:%Y}/{date:%m}/{date:%d}/" }
 subset_vars = ["lon", "lat", "date", "hyam", "hyai", "hybm", "hybi", "ps", "no2"]
 
+
 [products.goes_fire]
-provider = "goes-s3fs"
-hour_path_template = "noaa-goes16/ABI-L2-FDCC/{date:%Y}/{date:%j}/{date:%H}/"
+provider = "goes-s3fs-multi"
+
+[[products.goes_fire.hour_path_templates]]
+start = "2018-08-27"
+stop = "2023-01-04"
+pattern = "noaa-goes17/ABI-L2-FDCC/{date:%Y}/{date:%j}/{date:%H}/"
+
+[[products.goes_fire.hour_path_templates]]
+start = "2023-01-04"
+pattern = "noaa-goes18/ABI-L2-FDCC/{date:%Y}/{date:%j}/{date:%H}/"
 
 [[scene]]
 name = 'eaton_and_palisades'
