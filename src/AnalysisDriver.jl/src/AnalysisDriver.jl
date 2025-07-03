@@ -8,6 +8,7 @@ include("TropomiNO2.jl")
 include("TropomiCO.jl")
 include("DoGridding.jl")
 include("Plotting.jl")
+include("Enhancements.jl")
 
 function end2end_driver(config_file, full_recheck=false, force_rerun=false, debug_level=0)
     pyssd = pyimport("sat_scene_download")
@@ -17,6 +18,7 @@ function end2end_driver(config_file, full_recheck=false, force_rerun=false, debu
     l2_dir = cfg["files"]["l2_dir"]
     grid_dir = cfg["files"]["grid_dir"]
     plot_dir = cfg["files"]["plot_dir"]
+    enhancement_dir = cfg["files"]["enhancement_dir"]
     for scene in cfg["scene"]
         gridding_driver.grid_no2_scene_from_config(
             scene_dict=scene,
@@ -30,7 +32,14 @@ function end2end_driver(config_file, full_recheck=false, force_rerun=false, debu
             grid_dir=grid_dir,
             debug_level=debug_level
         )
+        enhancements.create_enhancement_file(
+            scene=scene,
+            grid_dir=grid_dir,
+            enhancement_dir=enhancement_dir
+        )
     end
+
+
 
     plotting.plot_gridded_files(
         cfg["scene"],

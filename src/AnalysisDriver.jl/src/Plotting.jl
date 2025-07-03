@@ -8,9 +8,9 @@ using PythonPlot
 
 function plot_gridded_files(scenes, grid_dir, plot_dir)
     mkpath(plot_dir)
-    matched_files = match_files(grid_dir)
+    matched_files = AnalysisDriver.utils.match_files(grid_dir)
     for (datestr, files) in matched_files
-        scene = _match_scene(files["no2"], scenes)
+        scene = AnalysisDriver.utils.match_scene(files["no2"], scenes)
         save_as = joinpath(plot_dir, "$(scene["name"])_$datestr.png")
         if AnalysisDriver.utils.check_mtime(save_as, collect(values(files)))
             plot_scene(datestr, files["no2"], files["co"], scene, save_as=save_as)
@@ -18,21 +18,6 @@ function plot_gridded_files(scenes, grid_dir, plot_dir)
     end
 end
 
-function match_files(grid_dir)
-    no2_basenames = readdir(joinpath(grid_dir, "no2"))
-    files = Dict()
-    for no2_name in no2_basenames
-        datestr = match(r"(\d{8})", no2_name)[1]
-        co_name = replace(no2_name, "_no2_" => "_co_")
-        tmp = Dict("no2" => joinpath(grid_dir, "no2", no2_name), "co" => joinpath(grid_dir, "co", co_name))
-        if !isfile(tmp["co"])
-            error("Missing expected CO gridded file, $(tmp["co"])")
-        end
-        files[datestr] = tmp
-    end
-
-    return files
-end
 
 function plot_scene(datestr, no2_file, co_file, scene_dict; save_as=nothing)
     ccrs = pyimport("cartopy" => "crs")
@@ -57,10 +42,10 @@ function plot_scene(datestr, no2_file, co_file, scene_dict; save_as=nothing)
         cmap="Oranges", cblabel="Total CO (molec. cm\$^{-2}\$)", vmin=co_clim[1], vmax=co_clim[2]
     )
 
-    if !AnalysisDriver.utils.isclose(no2_grid["lon"], co_grid["lon"])
+    if !AnalysisDriver.utils.allclose(no2_grid["lon"], co_grid["lon"])
         error("Not implemented: different NO2 and CO longitude grids")
     end
-    if !AnalysisDriver.utils.isclose(no2_grid["lat"], co_grid["lat"])
+    if !AnalysisDriver.utils.allclose(no2_grid["lat"], co_grid["lat"])
         error("Not implemented: different NO2 and CO latitude grids")
     end
     ratio = 1e3 .* no2_grid["vcd"] ./ co_grid["vcd"]
@@ -106,15 +91,6 @@ function _pcolor_helper(ax, lon, lat, vcd; cmap, cblabel, vmin=nothing, vmax=not
 end
 
 
-function _match_scene(no2_file, scenes)
-    bname = basename(no2_file)
-    for scene in scenes
-        if occursin(scene["name"], bname)
-            return scene
-        end
-    end
-    error("No scene found for NO2 file '$no2_file'")
-end
 
 
 end

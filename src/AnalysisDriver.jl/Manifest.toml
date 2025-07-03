@@ -2,7 +2,7 @@
 
 julia_version = "1.11.4"
 manifest_format = "2.0"
-project_hash = "d0b8285a79b4c707d84e87ad84b0040fb2cad54a"
+project_hash = "7568f88e94e4eb3c7f8a3034bbacccb293abfe3e"
 
 [[deps.Adapt]]
 deps = ["LinearAlgebra", "Requires"]
@@ -420,6 +420,11 @@ version = "1.11.0"
 
     [deps.Pkg.weakdeps]
     REPL = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
+
+[[deps.PolygonOps]]
+git-tree-sha1 = "77b3d3605fc1cd0b42d95eba87dfcd2bf67d5ff6"
+uuid = "647866c9-e3ac-4575-94e7-e3d426903924"
+version = "0.1.2"
 
 [[deps.PrecompileTools]]
 deps = ["Preferences"]
