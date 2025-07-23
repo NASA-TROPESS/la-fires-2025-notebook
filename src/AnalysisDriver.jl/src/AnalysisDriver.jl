@@ -7,6 +7,7 @@ include("Utils.jl")
 include("TropomiNO2.jl")
 include("TropomiCO.jl")
 include("DoGridding.jl")
+include("GoesSummary.jl")
 include("Plotting.jl")
 include("Enhancements.jl")
 
@@ -18,6 +19,7 @@ function end2end_driver(config_file, full_recheck=false, force_rerun=false, debu
     l2_dir = cfg["files"]["l2_dir"]
     grid_dir = cfg["files"]["grid_dir"]
     plot_dir = cfg["files"]["plot_dir"]
+    goes_summary_dir = cfg["files"]["goes_summary_dir"]
     enhancement_dir = cfg["files"]["enhancement_dir"]
     for scene in cfg["scene"]
         gridding_driver.grid_no2_scene_from_config(
@@ -36,6 +38,12 @@ function end2end_driver(config_file, full_recheck=false, force_rerun=false, debu
             scene=scene,
             grid_dir=grid_dir,
             enhancement_dir=enhancement_dir
+        )
+        @info "Hi, let's make a GOES summary!"
+        goes_summary.summarize_goes_fire_data_driver(
+            scene_dict=scene,
+            l2_dir=l2_dir,
+            summary_dir=goes_summary_dir
         )
     end
 

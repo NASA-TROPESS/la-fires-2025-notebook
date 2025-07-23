@@ -147,4 +147,60 @@ function match_scene(no2_file, scenes)
     error("No scene found for NO2 file '$no2_file'")
 end
 
+
+"""
+    load_goes_coordinates(ds)
+
+Load latitude and longitude from a GOES file. For some reason, Cartopy+metpy doesn't
+handle the transformation correctly, so we have to do this manually. The returned values
+will be arrays of latitude and longitude the same shape as the GOES 2D variables.
+"""
+function load_goes_coordinates(ds)
+    # Adapted from https://makersportal.com/blog/2018/11/25/goes-r-satellite-latitude-and-longitude-grid-projection-algorithm
+    # GOES-R projection info and retrieving relevant constants
+    proj_info = ds["goes_imager_projection"]
+
+    lon_origin = proj_info.attrib["longitude_of_projection_origin"]
+    H = proj_info.attrib["perspective_point_height"] + proj_info.attrib["semi_major_axis"]
+    r_eq = proj_info.attrib["semi_major_axis"]
+    r_pol = proj_info.attrib["semi_minor_axis"]
+
+    # Data info
+    lat_rad_1d = ds["x"][:]
+    lon_rad_1d = ds["y"][:]
+
+    # create meshgrid filled with radian angles
+    lat_rad, lon_rad = make_grid(lat_rad_1d, lon_rad_1d)
+
+    # lat/lon calc routine from satellite radian angle vectors
+    lambda_0 = lon_origin * pi / 180.0
+
+    a_var = sin.(lat_rad) .^ 2.0 .+ (
+        cos.(lat_rad) .^ 2.0 .* (
+            cos.(lon_rad) .^ 2.0 .+ (
+                ((r_eq .* r_eq) ./ (r_pol .* r_pol)) .* sin.(lon_rad) .^ 2.0
+            )
+        )
+    )
+    b_var = -2.0 .* H .* cos.(lat_rad) .* cos.(lon_rad)
+    c_var = H .^ 2.0 .- r_eq .^ 2.0
+
+    inner = (b_var .^ 2) .- (4.0 .* a_var .* c_var)
+    inner[inner.<0] .= NaN
+
+    r_s = (-1.0 .* b_var .- sqrt.(inner)) ./ (2.0 .* a_var)
+
+    s_x = r_s .* cos.(lat_rad) .* cos.(lon_rad)
+    s_y = -r_s .* sin.(lat_rad)
+    s_z = r_s .* cos.(lat_rad) .* sin.(lon_rad)
+
+    lat = 180.0 / pi .* (
+        atan.(
+            ((r_eq .* r_eq) ./ (r_pol .* r_pol)) .* ((s_z ./ sqrt.(((H .- s_x) .* (H .- s_x)) .+ (s_y .* s_y))))
+        )
+    )
+    lon = (lambda_0 .- atan.(s_y ./ (H .- s_x))) .* 180.0 ./ pi
+    return lat, lon
+end
+
 end
