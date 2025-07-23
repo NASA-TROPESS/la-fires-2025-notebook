@@ -3,6 +3,7 @@ l2_dir = "tropomi/l2/"
 grid_dir = "tropomi/gridded/"
 plot_dir = "tropomi/plots/"
 enhancement_dir = "tropomi/enhancements/"
+goes_summary_dir = "goes"
 
 [defaults]
 box_width = 10.0
