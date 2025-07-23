@@ -166,6 +166,10 @@ function make_one_gas_scene_backgrounds(grid_dir, scene, gas, gas_var, selectors
 
     for (idate, date) in enumerate(dates)
         file = grid_file_name(grid_dir, gas, name, date)
+        if !isfile(file)
+            @warn "$file does not exist, skipping $gas enhancement calculation for $date"
+            continue
+        end
         lat, lon, cols = load_gridded_data(file, gas_var)
         if isnothing(backgrounds)
             nlon = length(lon)
@@ -198,8 +202,16 @@ function compute_enhancements(dates, bck_lat, bck_lon, bck_no2, bck_co, grid_dir
     co_enhancements = fill(NaN, size(bck_co))
     for (idate, date) in enumerate(dates)
         no2_file = grid_file_name(grid_dir, "no2", scene_name, date)
+        if !isfile(no2_file)
+            @warn "$no2_file does not exist, skipping enhancement calculations for $date"
+            continue
+        end
         no2_lat, no2_lon, no2_vcds = load_gridded_data(no2_file, "no2_trop")
         co_file = grid_file_name(grid_dir, "co", scene_name, date)
+        if !isfile(co_file)
+            @warn "$co_file does not exist, skipping enhancement calculations for $date"
+            continue
+        end
         co_lat, co_lon, co_vcds = load_gridded_data(co_file, "co")
 
         if !AnalysisDriver.utils.allclose(no2_lat, bck_lat) || !AnalysisDriver.utils.allclose(no2_lon, bck_lon)
@@ -535,7 +547,12 @@ function get_background(
     extent=nothing
 )::AbstractArray{T} where {T<:AbstractFloat}
     subset = AnalysisDriver.utils.subset_grid_values(extent, grid_lat, grid_lon, grid_values)
-    bckgnd = quantile(skipmissing(subset[.!isnan.(subset)]), selector.q)
+    bckgnd = NaN
+    try
+        bckgnd = quantile(skipmissing(subset[.!isnan.(subset)]), selector.q)
+    catch err
+        @error("When computing background quantile, got error: '$err'. Background will be a NaN for this date.")
+    end
     bckgnd = fill(bckgnd, size(grid_values))
     return bckgnd
 end

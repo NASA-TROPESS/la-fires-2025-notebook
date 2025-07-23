@@ -28,6 +28,7 @@ subset_vars = ["lon", "lat", "date", "hyam", "hyai", "hybm", "hybi", "ps", "no2"
 
 [products.goes_fire]
 provider = "goes-s3fs-multi"
+required = false
 
 [[products.goes_fire.hour_path_templates]]
 start = "2018-08-27"
@@ -47,6 +48,11 @@ lon = -119.5
 lonwidth = 11.0
 latwidth = 10.0
 
+[[scene.subscene]]
+name = "la_basin"
+fire_start = "2025-01-08"
+extent = [-119.0, -117.0, 33.5, 34.5]
+
 [[scene]]
 name = 'carr_whaleback_and_perry'
 start = "2018-07-16"
@@ -55,6 +61,31 @@ lat = 40.0
 lon = -121.1
 lonwidth = 11.0
 latwidth = 10.0
+
+[[scene.subscene]]
+name = 'carr'
+fire_start = "2018-07-23"
+extent = [-123.1, -122.1, 40.1, 41.1]
+references = ["https://en.wikipedia.org/wiki/Carr_Fire"]
+
+[[scene.subscene]]
+name = 'whaleback'
+fire_start = "2018-07-27"
+extent = [-121.3, -120.3, 40.1, 41.1]
+references = ["https://en.wikipedia.org/wiki/Whaleback_Fire"]
+
+[[scene.subscene]]
+name = 'perry'
+fire_start = "2018-07-29"
+extent = [-120.3, -119.3, 39.0, 40.0]
+references = ["https://en.wikipedia.org/wiki/Perry_Fire"]
+
+[[scene.subscene]]
+name = 'mendocino_complex'
+fire_start = "2018-07-27"
+extent = [-123.5, -122.0, 38.8, 39.8]
+references = ["https://en.wikipedia.org/wiki/Mendocino_Complex_Fire"]
+
 
 [[scene]]
 name = 'bridge_airport_and_line'
@@ -65,6 +96,33 @@ lon = -117.743
 lonwidth = 11.0
 latwidth = 10.0
 
+[[scene.subscene]]
+name = 'combined'
+fire_start = "2024-09-05"
+extent = [-118.5, -116.3, 33.1, 35.0]
+
+[[scene.subscene]]
+name = 'bridge'
+fire_start = "2024-09-08"
+extent = [-118.2, -117.2, 33.7, 34.7]
+omit = true
+references = ["https://en.wikipedia.org/wiki/Bridge_Fire"]
+
+[[scene.subscene]]
+name = 'airport'
+fire_start = "2024-09-09"
+extent = [-118.0, -117.0, 33.1, 34.1]
+omit = true
+references = ["https://en.wikipedia.org/wiki/Line_Fire"]
+
+[[scene.subscene]]
+name = 'line'
+fire_start = "2024-09-05"
+extent = [-117.6, -116.6, 33.6, 34.6]
+omit = true
+references = ["https://en.wikipedia.org/wiki/Airport_Fire"]
+
+
 [[scene]]
 name = 'sqf_lightning_complex_2024'
 start = "2024-07-06"
@@ -73,6 +131,12 @@ lat = 35.987
 lon = -118.311
 lonwidth = 11.0
 latwidth = 10.0
+
+[[scene.subscene]]
+name = 'main'
+fire_start = "2024-07-13"
+extent = [-118.8, -117.8, 35.2, 36.5]
+references = ["https://en.wikipedia.org/wiki/2024_SQF_Lightning_Complex"]
 
 [[scene]]
 name = 'shelly'
@@ -83,6 +147,13 @@ lon = -123.058
 lonwidth = 11.0
 latwidth = 10.0
 
+[[scene.subscene]]
+name = 'main'
+fire_start = "2024-07-03"
+extent = [-123.5, -122.5, 40.9, 41.9]
+references = ["https://www.fire.ca.gov/incidents/2024/7/3/shelly-fire", "https://en.wikipedia.org/wiki/2024_California_wildfires"]
+
+
 [[scene]]
 name = 'lake_2024'
 start = "2024-06-28"
@@ -91,6 +162,13 @@ lat = 34.785
 lon = -120.045
 lonwidth = 11.0
 latwidth = 10.0
+
+[[scene.subscene]]
+name = 'main'
+fire_start = "2024-07-05"
+extent = [-120.5, -119.5, 34.3, 35.3]
+references = ["https://www.fire.ca.gov/incidents/2024/7/5/lake-fire", "https://en.wikipedia.org/wiki/Lake_Fire_(2024)"]
+
 
 [[scene]]
 name = 'durkee'
@@ -101,6 +179,13 @@ lon = -117.477
 lonwidth = 11.0
 latwidth = 10.0
 
+[[scene.subscene]]
+name = 'main'
+fire_start = "2024-07-17"
+extent = [-117.9, -116.9, 44.0, 45.0]
+references = ["https://en.wikipedia.org/wiki/Durkee_Fire"]
+
+
 [[scene]]
 name = 'park'
 start = "2024-07-17"
@@ -110,14 +195,27 @@ lon = -121.761
 lonwidth = 11.0
 latwidth = 10.0
 
+[[scene.subscene]]
+name = 'main'
+fire_start = "2024-07-24"
+extent = [-122.2, -120.0, 39.5, 41.3]
+references = ["https://en.wikipedia.org/wiki/Park_Fire"]
+
 [[scene]]
 name = 'calf_canyon_and_hermits_peak'
-start = "2024-03-30"
-end = "2024-04-29"
+start = "2022-03-30"
+end = "2022-04-29"
 lat = 35.759
 lon = -105.503
 lonwidth = 11.0
 latwidth = 10.0
+
+[[scene.subscene]]
+name = 'main'
+fire_start = "2022-04-06"
+extent = [-106.0, -105.0, 35.2, 36.2]
+references = ["https://en.wikipedia.org/wiki/Calf_Canyon/Hermits_Peak_Fire"]
+
 
 [[scene]]
 name = 'oak'
@@ -128,6 +226,13 @@ lon = -119.923
 lonwidth = 11.0
 latwidth = 10.0
 
+
+[[scene.subscene]]
+name = 'main'
+fire_start = "2022-07-22"
+extent = [-120.4, -119.2, 37.0, 38.5]
+references = ["https://en.wikipedia.org/wiki/Oak_Fire_(2022)"]
+
 [[scene]]
 name = 'electra'
 start = "2022-06-27"
@@ -136,6 +241,13 @@ lat = 38.335
 lon = -120.665
 lonwidth = 11.0
 latwidth = 10.0
+
+[[scene.subscene]]
+name = 'main'
+fire_start = "2022-07-04"
+extent = [-121.1, -120.1, 37.8, 38.8]
+references = ["https://en.wikipedia.org/wiki/Electra_Fire_(2022)"]
+
 
 [[scene]]
 name = 'dixie'
@@ -146,6 +258,12 @@ lon = -121.419
 lonwidth = 11.0
 latwidth = 10.0
 
+[[scene.subscene]]
+name = 'main'
+fire_start = "2021-07-13"
+extent = [-121.9, -120.4, 39.3, 41.3]
+references = ["https://en.wikipedia.org/wiki/Dixie_Fire"]
+
 [[scene]]
 name = 'bootleg'
 start = "2021-06-29"
@@ -154,6 +272,29 @@ lat = 42.616
 lon = -121.421
 lonwidth = 11.0
 latwidth = 10.0
+
+[[scene.subscene]]
+name = 'main'
+fire_start = "2021-07-06"
+extent = [-121.9, -120.0, 42.1, 43.3]
+references = ["https://en.wikipedia.org/wiki/Bootleg_Fire"]
+
+
+[[scene]]
+name = "bobcat"
+start = "2020-08-30"
+end = "2020-10-06"
+lat = 34.241
+lon = -117.868
+lonwidth = 11.0
+latwidth = 10.0
+
+[[scene.subscene]]
+name = 'main'
+fire_start = "2020-09-06"
+extent = [-118.4, -117.3, 33.7, 34.7]
+references = ["https://en.wikipedia.org/wiki/Bobcat_Fire"]
+
 
 [[scene]]
 name = 'creek_2020'
@@ -164,6 +305,13 @@ lon = -119.261
 lonwidth = 11.0
 latwidth = 10.0
 
+[[scene.subscene]]
+name = 'main'
+fire_start = "2020-09-04"
+extent = [-120.5, -118.7, 36.6, 38.2]
+references = ["https://en.wikipedia.org/wiki/Creek_Fire"]
+
+
 [[scene]]
 name = 'dolan'
 start = "2020-08-11"
@@ -172,6 +320,13 @@ lat = 36.123
 lon = -121.602
 lonwidth = 11.0
 latwidth = 10.0
+
+[[scene.subscene]]
+name = 'main'
+fire_start = "2020-08-18"
+extent = [-122.1, -121.1, 35.6, 36.6]
+references = ["https://en.wikipedia.org/wiki/Dolan_Fire"]
+
 
 [[scene]]
 name = 'august_complex'
@@ -182,6 +337,13 @@ lon = -122.673
 lonwidth = 11.0
 latwidth = 10.0
 
+[[scene.subscene]]
+name = 'main'
+fire_start = "2020-08-16"
+extent = [-124.0, -122.1, 39.2, 40.6]
+references = ["https://en.wikipedia.org/wiki/August_Complex_fire"]
+
+
 [[scene]]
 name = 'red_salmon_complex'
 start = "2020-07-20"
@@ -190,6 +352,13 @@ lat = 41.185
 lon = -123.433
 lonwidth = 11.0
 latwidth = 10.0
+
+[[scene.subscene]]
+name = 'main'
+fire_start = "2020-07-27"
+extent = [-123.9, -122.9, 40.7, 41.7]
+references = ["https://en.wikipedia.org/wiki/Red_Salmon_Complex_fire"]
+
 
 [[scene]]
 name = 'apple'
@@ -200,6 +369,13 @@ lon = -116.964
 lonwidth = 11.0
 latwidth = 10.0
 
+[[scene.subscene]]
+name = 'main'
+fire_start = "2020-07-31"
+extent = [-117.4, -116.4, 33.5, 34.5]
+references = ["https://en.wikipedia.org/wiki/Apple_Fire"]
+
+
 [[scene]]
 name = 'bighorn_tucson'
 start = "2020-05-29"
@@ -209,3 +385,24 @@ lon = -110.943
 lonwidth = 11.0
 latwidth = 10.0
 
+[[scene.subscene]]
+name = 'main'
+fire_start = "2020-06-05"
+extent = [-111.4, -110.0, 31.9, 33.1]
+references = ["https://en.wikipedia.org/wiki/Bighorn_Fire"]
+
+
+[[scene]]
+name = 'woolsey'
+start = "2018-11-01"
+end = "2018-11-21"
+lat = 34.235
+lon = -118.701
+lonwidth = 11.0
+latwidth = 10.0
+
+[[scene.subscene]]
+name = 'main'
+fire_start = "2018-11-08"
+extent = [-119.2, -118.2, 33.7, 34.7]
+references = ["https://en.wikipedia.org/wiki/Woolsey_Fire"]
