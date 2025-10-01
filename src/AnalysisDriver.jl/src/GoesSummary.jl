@@ -36,6 +36,10 @@ function summarize_goes_fire_data_driver(; scene_dict, l2_dir, summary_dir)
     end
 
     json_file = joinpath(l2_dir, "goes_fire", "$(scene_name)_download_parameters.json")
+    if !isfile(json_file)
+        @warn "JSON file $json_file does not exist, will not make GOES summary for $scene_name"
+        return
+    end
     for subscene in subscenes
         sub_name = subscene["name"]
         sub_extent = subscene["extent"]
@@ -182,6 +186,7 @@ end
 
 
 function summary_file_needs_remade(summary_file, json_file)
+    @info "Reading JSON file $json_file"
     json_data = JSON3.read(json_file)
     input_dir = dirname(json_file)
     input_files = [joinpath(input_dir, f) for f in json_data[:files]]
