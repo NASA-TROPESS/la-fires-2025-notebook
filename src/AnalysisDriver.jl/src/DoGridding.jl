@@ -69,6 +69,41 @@ function grid_co_scene(; l2_json_file, output_template, grid_res=0.025, debug_le
     end
 end
 
+
+function grid_scene_from_config(; scene_dict, l2_dir, grid_dir, subdir, grid_config, grid_res=0.025, grouping_fxn=group_tropomi_files_by_start_date, debug_level=0)
+    scene_name = scene_dict["name"]
+    l2_json_file = joinpath(l2_dir, subdir, "$(scene_name)_download_parameters.json")
+    output_dir = joinpath(grid_dir, subdir)
+    mkpath(output_dir)
+    output_template = joinpath(output_dir, "gridded_$(subdir)_$(scene_name)_{{Date}}.nc")
+    grid_scene(
+        quantity=subdir,
+        l2_json_file=l2_json_file,
+        output_template=output_template,
+        config=grid_config,
+        grid_res=grid_res,
+        grouping_fxn=grouping_fxn,
+        debug_level=debug_level
+    )
+end
+
+function grid_scene(; quantity, l2_json_file, output_template, config, grid_res=0.025, grouping_fxn=group_tropomi_files_by_start_date, debug_level=0)
+    l2_scene_info = JSON3.parsefile(l2_json_file)
+    l2_files_by_date = grouping_fxn(l2_scene_info[:files], dirname(l2_json_file))
+    grid_latlim, grid_lonlim = grid_def_from_scene(l2_scene_info[:scene], grid_res)
+    output_template = Mustache.parse(output_template)
+
+    for (date, files) in l2_files_by_date
+        dstr = Dates.format(date, dateformat"yyyymmdd")
+        output_file = Mustache.render(output_template, Dict("Date" => dstr, "Gas" => quantity, "Scene" => l2_scene_info[:scene][:name]))
+        if grid_update_required(l2_json_file, files, output_file)
+            @info "Gridding $(uppercase(quantity)) for $date"
+            grid_scene_for_date(files, config, grid_latlim, grid_lonlim, output_file; grid_res=grid_res, debug_level=debug_level)
+        end
+    end
+end
+
+
 function grid_scene_for_date(files, grid_config, grid_latlim, grid_lonlim, output_file; grid_res=0.025, debug_level=0)
     output_dir = dirname(output_file)
     mkpath(output_dir)
@@ -109,6 +144,25 @@ function group_tropomi_files_by_start_date(tropomi_files, parent=nothing)
     return files
 end
 
+function group_measures_files_by_start_date(measures_files, parent=nothing)
+    # These files stick a literal 'm' in their dates for some reason 
+    files = Dict()
+    for f in measures_files
+        dstr = basename(f)[34:42]
+        dstr = replace(dstr, "m" => "")
+        date = Date(dstr, dateformat"yyyymmdd")
+        if !isnothing(parent)
+            f = joinpath(parent, f)
+        end
+
+        if !haskey(files, date)
+            files[date] = [f]
+        else
+            push!(files[date], f)
+        end
+    end
+    return files
+end
 
 function grid_update_required(json_scene_file, l2_files, output_file)
     return AnalysisDriver.utils.check_mtime(output_file, [json_scene_file, l2_files...])

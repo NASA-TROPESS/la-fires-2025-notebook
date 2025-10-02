@@ -6,6 +6,7 @@ using TOML
 include("Utils.jl")
 include("TropomiNO2.jl")
 include("TropomiCO.jl")
+include("TropomiAerosols.jl")
 include("DoGridding.jl")
 include("GoesSummary.jl")
 include("Plotting.jl")
@@ -32,6 +33,23 @@ function end2end_driver(config_file, full_recheck=false, force_rerun=false, debu
             scene_dict=scene,
             l2_dir=l2_dir,
             grid_dir=grid_dir,
+            debug_level=debug_level
+        )
+        gridding_driver.grid_scene_from_config(
+            scene_dict=scene,
+            l2_dir=l2_dir,
+            grid_dir=grid_dir,
+            subdir="alh",
+            grid_config=tropomi_aerosols.tropomi_alh_config(),
+            debug_level=debug_level
+        )
+        gridding_driver.grid_scene_from_config(
+            scene_dict=scene,
+            l2_dir=l2_dir,
+            grid_dir=grid_dir,
+            subdir="aer",
+            grid_config=tropomi_aerosols.tropomi_aer_config(),
+            grouping_fxn=gridding_driver.group_measures_files_by_start_date,
             debug_level=debug_level
         )
         enhancements.create_enhancement_file(
