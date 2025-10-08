@@ -1,0 +1,14 @@
+[project]
+name = "pynbcode"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Joshua Laughner", email = "josh.laughner@jpl.nasa.gov" }
+]
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
