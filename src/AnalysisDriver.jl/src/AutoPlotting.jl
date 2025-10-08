@@ -1,4 +1,4 @@
-module plotting
+module auto_plotting
 
 using AnalysisDriver
 using NCDatasets

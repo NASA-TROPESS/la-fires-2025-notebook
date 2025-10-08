@@ -1,5 +1,7 @@
 module utils
 
+export setdefault!
+
 """
     check_mtime(output_file, input_files)
 
@@ -201,6 +203,12 @@ function load_goes_coordinates(ds)
     )
     lon = (lambda_0 .- atan.(s_y ./ (H .- s_x))) .* 180.0 ./ pi
     return lat, lon
+end
+
+function setdefault!(d::AbstractDict, k, v)
+    if !haskey(d, k)
+        d[k] = v
+    end
 end
 
 end

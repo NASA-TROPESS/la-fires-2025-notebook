@@ -9,8 +9,10 @@ include("TropomiCO.jl")
 include("TropomiAerosols.jl")
 include("DoGridding.jl")
 include("GoesSummary.jl")
-include("Plotting.jl")
+include("AutoPlotting.jl")
 include("Enhancements.jl")
+
+include("Plots.jl")
 
 function end2end_driver(config_file, full_recheck=false, force_rerun=false, debug_level=0)
     pyssd = pyimport("sat_scene_download")
@@ -67,7 +69,7 @@ function end2end_driver(config_file, full_recheck=false, force_rerun=false, debu
 
 
 
-    plotting.plot_gridded_files(
+    auto_plotting.plot_gridded_files(
         cfg["scene"],
         grid_dir,
         plot_dir,

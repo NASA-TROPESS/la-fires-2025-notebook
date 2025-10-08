@@ -12,8 +12,8 @@ function tropomi_alh_config()
         vars_to_grid=Dict(
             "alh" => "PRODUCT/aerosol_mid_height",
             "alh_prec" => "PRODUCT/aerosol_mid_height_precision",
-            "alh" => "PRODUCT/aerosol_mid_pressure",
-            "alh_prec" => "PRODUCT/aerosol_mid_pressure_precision",
+            "alp" => "PRODUCT/aerosol_mid_pressure",
+            "alp_prec" => "PRODUCT/aerosol_mid_pressure_precision",
         )
     )
 end
