@@ -1,0 +1,267 @@
+[files]
+l2_dir = "tropomi/l2/"
+grid_dir = "tropomi/gridded/"
+plot_dir = "tropomi/plots/"
+enhancement_dir = "tropomi/enhancements/"
+goes_summary_dir = "goes"
+
+[defaults]
+box_width = 10.0
+
+[products.no2]
+# Must specify version, or we get both the v1 and v2 NO2 products
+provider = "earthaccess"
+filters = { short_name = "S5P_L2__NO2____HiR", version = "2" }
+
+
+[products.co]
+# Must specify version, or we get both the v1 and v2 CO products,
+# and v1 doesn't include the a priori
+provider = "earthaccess"
+filters = { short_name = "S5P_L2__CO_____HiR", version = "2" }
+
+
+[products.no2_prior]
+provider = "tropomi-priors-eodata"
+filters = { Prefix = "Sentinel-5P/AUX/AUX_CTMANA/{date:%Y}/{date:%m}/{date:%d}/" }
+subset_vars = ["lon", "lat", "date", "hyam", "hyai", "hybm", "hybi", "ps", "no2"]
+
+
+[products.goes_fire]
+provider = "goes-s3fs-multi"
+required = false
+
+[[products.goes_fire.hour_path_templates]]
+start = "2018-08-27"
+stop = "2023-01-04"
+pattern = "noaa-goes17/ABI-L2-FDCC/{date:%Y}/{date:%j}/{date:%H}/"
+
+[[products.goes_fire.hour_path_templates]]
+start = "2023-01-04"
+pattern = "noaa-goes18/ABI-L2-FDCC/{date:%Y}/{date:%j}/{date:%H}/"
+
+
+[[scene]]
+name = "anderson_lionshead"
+start = "2020-08-10"
+end = "2020-09-22"
+lat = 44.723
+lon = -121.679
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2020-08-17"
+  extent = [-122.179, -121.179, 44.223, 45.223]
+
+[[scene]]
+name = "anderson_august_complex"
+start = "2020-08-11"
+end = "2020-10-09"
+lat = 39.776
+lon = -122.673
+bounding_box = [2, 2]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2020-08-18"
+  extent = [-123.673, -121.673, 38.776, 40.776]
+
+[[scene]]
+name = "anderson_lnu_complex"
+start = "2020-08-11"
+end = "2020-08-30"
+lat = 38.482
+lon = -122.149
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2020-08-18"
+  extent = [-122.649, -121.649, 37.982, 38.982]
+
+[[scene]]
+name = "anderson_scu_complex"
+start = "2020-08-09"
+end = "2020-09-07"
+lat = 37.439
+lon = -121.304
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2020-08-16"
+  extent = [-121.804, -120.804, 36.939, 37.939]
+
+[[scene]]
+name = "anderson_sqf_complex"
+start = "2020-08-13"
+end = "2020-10-18"
+lat = 36.255
+lon = -118.497
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2020-08-20"
+  extent = [-118.997, -117.997, 35.755, 36.755]
+
+[[scene]]
+name = "anderson_creek"
+start = "2020-08-29"
+end = "2020-10-11"
+lat = 37.201
+lon = -119.272
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2020-09-05"
+  extent = [-119.772, -118.772, 36.701, 37.701]
+
+[[scene]]
+name = "anderson_bootleg"
+start = "2021-06-29"
+end = "2021-08-07"
+lat = 42.616
+lon = -121.421
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2021-07-06"
+  extent = [-121.921, -120.921, 42.116, 43.116]
+
+[[scene]]
+name = "anderson_beckwourth"
+start = "2021-06-30"
+end = "2021-07-16"
+lat = 39.832
+lon = -120.341
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2021-07-07"
+  extent = [-120.841, -119.841, 39.332, 40.332]
+
+[[scene]]
+name = "anderson_lick_creek"
+start = "2021-06-30"
+end = "2021-08-05"
+lat = 46.262
+lon = -117.416
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2021-07-07"
+  extent = [-117.916, -116.916, 45.762, 46.762]
+
+[[scene]]
+name = "anderson_mcfarland"
+start = "2021-07-24"
+end = "2021-08-27"
+lat = 40.350
+lon = -123.034
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2021-07-31"
+  extent = [-123.534, -122.534, 39.85, 40.85]
+
+[[scene]]
+name = "anderson_monument"
+start = "2021-07-24"
+end = "2021-09-14"
+lat = 40.752
+lon = -123.337
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2021-07-31"
+  extent = [-123.837, -122.837, 40.252, 41.252]
+
+[[scene]]
+name = "anderson_river_complex"
+start = "2021-07-24"
+end = "2021-09-14"
+lat = 41.143
+lon = -123.018
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2021-07-31"
+  extent = [-123.518, -122.518, 40.643, 41.643]
+
+[[scene]]
+name = "anderson_antelope"
+start = "2021-07-26"
+end = "2021-08-30"
+lat = 41.500
+lon = -121.929
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2021-08-02"
+  extent = [-122.429, -121.429, 41.0, 42.0]
+
+[[scene]]
+name = "anderson_schneider_springs"
+start = "2021-07-29"
+end = "2021-09-14"
+lat = 46.840
+lon = -121.146
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2021-08-05"
+  extent = [-121.646, -120.646, 46.34, 47.34]
+
+[[scene]]
+name = "anderson_caldor"
+start = "2021-08-08"
+end = "2021-09-13"
+lat = 38.586
+lon = -120.538
+bounding_box = [1, 1]
+lonwidth = 2.5
+latwidth = 2.0
+
+  [[scene.subscene]]
+  name = "main"
+  fire_start = "2021-08-15"
+  extent = [-121.038, -120.038, 38.086, 39.086]

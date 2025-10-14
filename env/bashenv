@@ -1,0 +1,2 @@
+export JULIA_CONDAPKG_BACKEND=NULL
+export JULIA_PYTHONCALL_EXE=$(realpath "../.mambaenv/bin/python3")
