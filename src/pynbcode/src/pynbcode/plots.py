@@ -7,7 +7,9 @@ import numpy as np
 import pandas as pd
 import re
 
-from typing import Optional, Tuple
+import jllutils.stats as jstats
+
+from typing import Optional, Tuple, Union
 
 
 STD_CO_ENH = 0.03 # mol/m2
@@ -105,6 +107,79 @@ def plot_gridded_data(
         add_features(ax) # Assumes this function is defined elsewhere
 
         return ax
+
+
+def er_vs_frp_box_plots(fire_df: pd.DataFrame, bin_edges: Union[int, np.ndarray] = 25, frp_column: str = 'mean_frp', show_anderson_fit=True, ax=None):
+    """Plot NO2:CO enhancement ratios vs. fire radiative power as a series of boxplots
+
+    This aims to reproduce Anderson et al. (2023) Fig. 3c (doi.org/10.1029/2023GL105811).
+
+    Parameters
+    ----------
+    fire_df:
+        A dataframe containing daily values of FRP in the column defined by ``frp_column`` and enhancement
+        ratios in the column named "er". Usually this will be one returned by
+        :func:`pynbcode.er_frp_analysis.match_frps_to_ers_many_files`.
+
+    bin_edges
+        Used to define the FRP bins. If an integer or float, then this defines the WIDTH of the FRP bins,
+        not the number as is typical for binning functions. In this case, the first bin will have
+        a lower edge of 0 and the last bin will be set to include the maximum FRP value. If this is
+        an array instead, it must define the actual bin edges.
+
+    frp_column
+        Which column in the dataframe to use for the FRP values.
+
+    show_anderson_fit
+        By default, the fit reported by Anderson et al. (2023) is plotted for comparison. Set this keyword
+        to ``False`` to hide that.
+
+    ax
+        Axes to plot into
+
+    """
+    if isinstance(bin_edges, (int, float)):
+        top_edge = np.floor(fire_df[frp_column].max() / bin_edges + 2) * bin_edges
+        bin_edges = np.arange(0, top_edge, bin_edges)
+
+    bin_x = []
+    bin_y = []
+    for edge, bin_df in fire_df.groupby(pd.cut(fire_df[frp_column], bin_edges), observed=True):
+        bin_x.append(edge)
+        bin_y.append(bin_df.er.to_numpy())
+
+    x = np.array([0.5*(b.left + b.right) for b in bin_x])
+    bin_meds = np.array([np.median(y) for y in bin_y])
+    bin_stds = np.array([np.std(y, ddof=1) for y in bin_y])
+    fit_days = jstats.PolyFitModel(x=fire_df[frp_column].to_numpy(), xerr=np.ones(fire_df.shape[0]), y=fire_df.er.to_numpy(), yerr=fire_df.er_unc.to_numpy())
+    fit_bins = jstats.PolyFitModel(x=x, xerr=np.ones(x.size), y=bin_meds, yerr=bin_stds, nans='drop')
+
+    width = np.mean([0.67*(b.right - b.left) for b in bin_x])
+
+    ax = ax or plt.gca()
+    ax.boxplot(bin_y, positions=x, widths=width)
+    ax.set_xticklabels(bin_x)
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
+    fit_days.plot_fit(ax, color='tab:blue', label=f'York fit, indiv. days: $({_to_sci_notation(fit_days.yint)}) + ({_to_sci_notation(fit_days.slope)})x$')
+    fit_bins.plot_fit(ax, color='tab:orange', label=f'York fit, bin medians: $({_to_sci_notation(fit_bins.yint)}) + ({_to_sci_notation(fit_bins.slope)})x$')
+    ax.grid(True)
+
+    h = ax.hexbin(fire_df[frp_column].to_numpy(), fire_df.er.to_numpy(), mincnt=1, gridsize=30, bins='log', cmap='pink_r')
+    plt.colorbar(h)
+
+    if show_anderson_fit:
+        ax.plot(bin_edges, 1.04e-5*bin_edges + 1.58e-4, color='r', ls=':', label='Fit from Anderson et al.: $(1.58 \\times 10^{-4}) + (1.04 \\times 10^{-5}) x$')
+
+    ax.legend(loc='lower center', bbox_to_anchor=(0.5, 1.05))
+    ax.set_xlabel('FRP bin (MW)')
+    ax.set_ylabel('NO$_2$:CO enhancement ratio (mol mol$^{-1}$)')
+
+
+def _to_sci_notation(v, decimals=2) -> str:
+    ex = int(np.floor(np.log10(np.abs(v))))
+    mantissa = np.round(v / 10**ex, decimals=decimals)
+    # This is used in a format call, so the curly braces need escaped twice
+    return f'{mantissa} \\times 10^{{{{{ex}}}}}'
 
 
 def subset_to_extent(lon, lat, values, extent):
