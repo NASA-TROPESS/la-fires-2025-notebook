@@ -109,7 +109,58 @@ def plot_gridded_data(
         return ax
 
 
-def er_vs_frp_box_plots(fire_df: pd.DataFrame, bin_edges: Union[int, np.ndarray] = 25, frp_column: str = 'mean_frp', show_anderson_fit=True, ax=None):
+def binned_box_plots(df: pd.DataFrame, xcol: str, ycol: str, bin_edges: Union[int, float, np.ndarray], add_hexbin: bool = True,
+                     fit_values: bool = True, xerr_col: Optional[str] = None, fit_bins: bool = True, yerr_col: Optional[str] = None,
+                     hexbin_kws=None, value_fit_plot_kws=None, bin_fit_plot_kws=None, fit_model='york', ax=None):
+    if isinstance(bin_edges, (int, float)):
+        top_edge = np.floor(df[xcol].max() / bin_edges + 2) * bin_edges
+        bin_edges = np.arange(0, top_edge, bin_edges)
+
+    bin_x = []
+    bin_y = []
+    for edge, bin_df in df.groupby(pd.cut(df[xcol], bin_edges), observed=True):
+        bin_x.append(edge)
+        bin_y.append(bin_df[ycol].to_numpy())
+
+    x = np.array([0.5*(b.left + b.right) for b in bin_x])
+    width = np.mean([0.67*(b.right - b.left) for b in bin_x])
+
+    ax = ax or plt.gca()
+    ax.boxplot(bin_y, positions=x, widths=width)
+    ax.set_xticklabels(bin_x)
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
+    if fit_values:
+        xerr = df[xerr_col].to_numpy() if xerr_col else np.ones(df.shape[0])
+        yerr = df[yerr_col].to_numpy() if yerr_col else np.ones(df.shape[0])
+        values_fit = jstats.PolyFitModel(x=df[xcol].to_numpy(), xerr=xerr, y=df[ycol].to_numpy(), yerr=yerr, model=fit_model)
+        value_fit_plot_kws = dict() if value_fit_plot_kws is None else value_fit_plot_kws
+        value_fit_plot_kws.setdefault('color', 'tab:blue')
+        value_fit_plot_kws.setdefault('label', f'York fit, indiv. days: ${_to_sci_notation(values_fit.yint)} + {_to_sci_notation(values_fit.slope)}x$')
+        values_fit.plot_fit(ax, **value_fit_plot_kws)
+    if fit_bins:
+        bin_meds = np.array([np.median(y) for y in bin_y])
+        bin_stds = np.array([np.std(y, ddof=1) for y in bin_y])
+        bins_fit = jstats.PolyFitModel(x=x, xerr=np.ones(x.size), y=bin_meds, yerr=bin_stds, nans='drop', model=fit_model)
+        bin_fit_plot_kws = dict() if bin_fit_plot_kws is None else bin_fit_plot_kws
+        bin_fit_plot_kws.setdefault('color', 'tab:orange')
+        bin_fit_plot_kws.setdefault('label', f'York fit, bin medians: ${_to_sci_notation(bins_fit.yint)} + {_to_sci_notation(bins_fit.slope)}x$')
+        bins_fit.plot_fit(ax, **bin_fit_plot_kws)
+    ax.grid(True)
+
+    hexbin_kws = dict() if hexbin_kws is None else hexbin_kws
+    hexbin_kws.setdefault('mincnt', 1)
+    hexbin_kws.setdefault('gridsize', 30)
+    hexbin_kws.setdefault('bins', 'log')
+    hexbin_kws.setdefault('cmap', 'pink_r')
+    h = ax.hexbin(df[xcol].to_numpy(), df[ycol].to_numpy(), **hexbin_kws)
+    plt.colorbar(h)
+
+    ax.set_xlabel(xcol)
+    ax.set_ylabel(ycol)
+
+
+
+def er_vs_frp_box_plots(fire_df: pd.DataFrame, bin_edges: Union[int, float, np.ndarray] = 25, frp_column: str = 'mean_frp', show_anderson_fit=True, ax=None):
     """Plot NO2:CO enhancement ratios vs. fire radiative power as a series of boxplots
 
     This aims to reproduce Anderson et al. (2023) Fig. 3c (doi.org/10.1029/2023GL105811).
@@ -160,12 +211,12 @@ def er_vs_frp_box_plots(fire_df: pd.DataFrame, bin_edges: Union[int, np.ndarray]
     ax.boxplot(bin_y, positions=x, widths=width)
     ax.set_xticklabels(bin_x)
     plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
-    fit_days.plot_fit(ax, color='tab:blue', label=f'York fit, indiv. days: $({_to_sci_notation(fit_days.yint)}) + ({_to_sci_notation(fit_days.slope)})x$')
-    fit_bins.plot_fit(ax, color='tab:orange', label=f'York fit, bin medians: $({_to_sci_notation(fit_bins.yint)}) + ({_to_sci_notation(fit_bins.slope)})x$')
+    fit_days.plot_fit(ax, color='tab:blue', label=f'York fit, indiv. days: ${_to_sci_notation(fit_days.yint)} + {_to_sci_notation(fit_days.slope)}x$')
+    fit_bins.plot_fit(ax, color='tab:orange', label=f'York fit, bin medians: ${_to_sci_notation(fit_bins.yint)} + {_to_sci_notation(fit_bins.slope)}x$')
     ax.grid(True)
 
     h = ax.hexbin(fire_df[frp_column].to_numpy(), fire_df.er.to_numpy(), mincnt=1, gridsize=30, bins='log', cmap='pink_r')
-    plt.colorbar(h)
+    plt.colorbar(h, label='# points')
 
     if show_anderson_fit:
         ax.plot(bin_edges, 1.04e-5*bin_edges + 1.58e-4, color='r', ls=':', label='Fit from Anderson et al.: $(1.58 \\times 10^{-4}) + (1.04 \\times 10^{-5}) x$')
@@ -175,11 +226,13 @@ def er_vs_frp_box_plots(fire_df: pd.DataFrame, bin_edges: Union[int, np.ndarray]
     ax.set_ylabel('NO$_2$:CO enhancement ratio (mol mol$^{-1}$)')
 
 
-def _to_sci_notation(v, decimals=2) -> str:
+def _to_sci_notation(v, decimals=2, exp_cutoff=2) -> str:
     ex = int(np.floor(np.log10(np.abs(v))))
+    if np.abs(ex) <= exp_cutoff:
+        return str(np.round(v, decimals=decimals))
     mantissa = np.round(v / 10**ex, decimals=decimals)
     # This is used in a format call, so the curly braces need escaped twice
-    return f'{mantissa} \\times 10^{{{{{ex}}}}}'
+    return f'({mantissa} \\times 10^{{{{{ex}}}}})'
 
 
 def subset_to_extent(lon, lat, values, extent):

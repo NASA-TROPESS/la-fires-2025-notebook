@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from enum import IntEnum
 import json
+from netCDF4 import Dataset
 import numpy as np
 import os
 import pandas as pd
@@ -92,11 +93,6 @@ class FrpProvider(ABC):
         """
         pass
 
-    @staticmethod
-    def dti_to_local_hours(index: pd.DatetimeIndex, tz: str) -> pd.Index:
-        index = index.tz_convert(tz)
-        return index.hour.astype(float) + index.minute.astype(float) / 60
-
 
 class ViirsFrpProvider(FrpProvider, FrpMultiSceneProvider):
     """An FRP provider for VIIRS data contained in a FIRMS JSON file.
@@ -112,7 +108,7 @@ class ViirsFrpProvider(FrpProvider, FrpMultiSceneProvider):
         self.df = self.load_viirs_json(json_file)
 
     def daily_frps(self, subscene_extent: Tuple[float, float, float, float], local_hour_limits: Tuple[float, float], tz='-08:00') -> pd.DataFrame:
-        local_hours = self.dti_to_local_hours(self.df.index, tz)
+        local_hours = _dti_to_local_hours(self.df.index, tz)
         xx_lon = (self.df.longitude >= subscene_extent[0]) & (self.df.longitude <= subscene_extent[1])
         xx_lat = (self.df.latitude >= subscene_extent[2]) & (self.df.latitude <= subscene_extent[3])
         xx_hr = (local_hours >= local_hour_limits[0]) & (local_hours <= local_hour_limits[1])
@@ -165,6 +161,67 @@ class ViirsMultiJsonFrpProvider(ViirsFrpProvider):
             dfs.append(self.load_viirs_json(jf))
         self.df = pd.concat(dfs)
 
+
+class GoesFrpProvider(FrpProvider):
+    def __init__(self, goes_file: os.PathLike) -> None:
+        self.df = self.load_goes(goes_file)
+
+    @classmethod
+    def from_scene(cls, scene_name, subscene_name, goes_summary_dir: os.PathLike) -> 'GoesFrpProvider':
+        goes_file = Path(goes_summary_dir) / f'{scene_name}-{subscene_name}-goes_summary.nc'
+        return cls(goes_file)
+
+    def daily_frps(self, subscene_extent: Tuple[float, float, float, float], local_hour_limits: Tuple[float, float], tz='-08:00') -> pd.DataFrame:
+        local_hours = _dti_to_local_hours(self.df.index, tz)
+        t1, t2 = local_hour_limits
+        x1, x2, y1, y2 = subscene_extent
+        tt = (local_hours >= t1) & (local_hours <= t2)
+        xx = (self.df.longitude >= x1) & (self.df.longitude <= x2)
+        yy = (self.df.latitude >= y1) & (self.df.latitude <= y2)
+        subscene_frp = self.df.loc[tt & xx & yy, 'frp']
+
+        dates = subscene_frp.index.tz_convert(tz).date
+        grouped_frp = subscene_frp.groupby(dates)
+        return pd.DataFrame({'mean_frp': grouped_frp.mean(), 'total_frp': grouped_frp.sum(), 'n_frp': grouped_frp.count()})
+
+    @staticmethod
+    def load_goes(goes_file, allowed_mask_values=np.array([10,12,13,14,30,32,33,34])):
+        with Dataset(goes_file) as ds:
+            time = ds['time'][:]
+            lat = ds['lat'][:].filled(np.nan)
+            lon = ds['lon'][:].filled(np.nan)
+            mask = ds['Mask'][:]
+            frp = ds['Power'][:]
+
+        # time is 1D so expand it to the full size before subsetting
+        time = np.broadcast_to(time.reshape(1, -1), lat.shape)
+
+        xx = np.isfinite(lon) & np.isfinite(lat)
+        mm = np.isin(mask, allowed_mask_values)
+
+        time = pd.Timestamp(1970,1,1) + pd.to_timedelta(time[xx & mm], unit='s')
+        lat = lat[xx & mm]
+        lon = lon[xx & mm]
+        frp = frp[xx & mm]
+
+        df = pd.DataFrame({'latitude': lat, 'longitude': lon, 'frp': frp}, index=time.tz_localize('utc'))
+        return df.dropna()
+
+
+class GoesMultiSceneFrpProvider(FrpMultiSceneProvider):
+    def __init__(self, goes_summary_dir: os.PathLike) -> None:
+        self.goes_summary_dir = goes_summary_dir
+        self.subscene_providers = dict()
+
+    def daily_frps_for_subscene(self, scene_name: str, subscene: dict, local_hour_limits: Tuple[float, float], tz='-08:00') -> pd.DataFrame:
+        provider_key = f'{scene_name}-{subscene["name"]}'
+        if provider_key not in self.subscene_providers:
+            self.subscene_providers[provider_key] = GoesFrpProvider.from_scene(scene_name, subscene['name'], self.goes_summary_dir)
+        return self.subscene_providers[provider_key].daily_frps(
+            subscene_extent=subscene['extent'],
+            local_hour_limits=local_hour_limits,
+            tz=tz
+        )
 
 
 class ErMultiSceneProvider(ABC):
@@ -326,3 +383,8 @@ def match_frps_to_ers_many_files(frp: FrpMultiSceneProvider, er: ErMultiScenePro
             subscene_df['fire_start'] = pd.to_datetime(subscene['fire_start'])
             dfs.append(subscene_df)
     return pd.concat(dfs)
+
+
+def _dti_to_local_hours(index: pd.DatetimeIndex, tz: str) -> pd.Index:
+    index = index.tz_convert(tz)
+    return index.hour.astype(float) + index.minute.astype(float) / 60
