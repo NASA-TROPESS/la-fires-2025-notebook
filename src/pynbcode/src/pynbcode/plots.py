@@ -111,7 +111,7 @@ def plot_gridded_data(
 
 def binned_box_plots(df: pd.DataFrame, xcol: str, ycol: str, bin_edges: Union[int, float, np.ndarray], add_hexbin: bool = True,
                      fit_values: bool = True, xerr_col: Optional[str] = None, fit_bins: bool = True, yerr_col: Optional[str] = None,
-                     hexbin_kws=None, value_fit_plot_kws=None, bin_fit_plot_kws=None, fit_model='york', ax=None):
+                     use_point=False, hexbin_kws=None, value_fit_plot_kws=None, bin_fit_plot_kws=None, fit_model='york', ax=None):
     if isinstance(bin_edges, (int, float)):
         top_edge = np.floor(df[xcol].max() / bin_edges + 2) * bin_edges
         bin_edges = np.arange(0, top_edge, bin_edges)
@@ -124,36 +124,43 @@ def binned_box_plots(df: pd.DataFrame, xcol: str, ycol: str, bin_edges: Union[in
 
     x = np.array([0.5*(b.left + b.right) for b in bin_x])
     width = np.mean([0.67*(b.right - b.left) for b in bin_x])
+    bin_meds = np.array([np.median(y) for y in bin_y])
+    bin_stds = np.array([np.std(y, ddof=1) for y in bin_y])
 
     ax = ax or plt.gca()
-    ax.boxplot(bin_y, positions=x, widths=width)
+    if use_point:
+        ax.errorbar(x, bin_meds, yerr=bin_stds, fmt='ko', ecolor='k')
+    else:
+        ax.boxplot(bin_y, positions=x, widths=width)
+    ax.set_xticks(x)
     ax.set_xticklabels(bin_x)
     plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
     if fit_values:
         xerr = df[xerr_col].to_numpy() if xerr_col else np.ones(df.shape[0])
         yerr = df[yerr_col].to_numpy() if yerr_col else np.ones(df.shape[0])
-        values_fit = jstats.PolyFitModel(x=df[xcol].to_numpy(), xerr=xerr, y=df[ycol].to_numpy(), yerr=yerr, model=fit_model)
+        values_fit = jstats.PolyFitModel(x=df[xcol].to_numpy(), xerr=xerr, y=df[ycol].to_numpy(), yerr=yerr, model=fit_model, nans='drop')
         value_fit_plot_kws = dict() if value_fit_plot_kws is None else value_fit_plot_kws
         value_fit_plot_kws.setdefault('color', 'tab:blue')
         value_fit_plot_kws.setdefault('label', f'York fit, indiv. points: ${_to_sci_notation(values_fit.yint)} + {_to_sci_notation(values_fit.slope)}x$')
-        values_fit.plot_fit(ax, **value_fit_plot_kws)
+        fit_y = values_fit.predict(x)
+        ax.plot(x, fit_y, **value_fit_plot_kws)
     if fit_bins:
-        bin_meds = np.array([np.median(y) for y in bin_y])
-        bin_stds = np.array([np.std(y, ddof=1) for y in bin_y])
-        bins_fit = jstats.PolyFitModel(x=x, xerr=np.ones(x.size), y=bin_meds, yerr=bin_stds, nans='drop', model=fit_model)
+        bins_fit = jstats.PolyFitModel(x=x, xerr=np.ones(x.size), y=bin_meds, yerr=bin_stds, model=fit_model, nans='drop')
         bin_fit_plot_kws = dict() if bin_fit_plot_kws is None else bin_fit_plot_kws
         bin_fit_plot_kws.setdefault('color', 'tab:orange')
         bin_fit_plot_kws.setdefault('label', f'York fit, bin medians: ${_to_sci_notation(bins_fit.yint)} + {_to_sci_notation(bins_fit.slope)}x$')
-        bins_fit.plot_fit(ax, **bin_fit_plot_kws)
+        fit_y = bins_fit.predict(x)
+        ax.plot(x, fit_y, **bin_fit_plot_kws)
     ax.grid(True)
 
-    hexbin_kws = dict() if hexbin_kws is None else hexbin_kws
-    hexbin_kws.setdefault('mincnt', 1)
-    hexbin_kws.setdefault('gridsize', 30)
-    hexbin_kws.setdefault('bins', 'log')
-    hexbin_kws.setdefault('cmap', 'pink_r')
-    h = ax.hexbin(df[xcol].to_numpy(), df[ycol].to_numpy(), **hexbin_kws)
-    plt.colorbar(h, label='# points')
+    if add_hexbin:
+        hexbin_kws = dict() if hexbin_kws is None else hexbin_kws
+        hexbin_kws.setdefault('mincnt', 1)
+        hexbin_kws.setdefault('gridsize', 30)
+        hexbin_kws.setdefault('bins', 'log')
+        hexbin_kws.setdefault('cmap', 'pink_r')
+        h = ax.hexbin(df[xcol].to_numpy(), df[ycol].to_numpy(), **hexbin_kws)
+        plt.colorbar(h, label='# points')
 
     ax.set_xlabel(xcol)
     ax.set_ylabel(ycol)
