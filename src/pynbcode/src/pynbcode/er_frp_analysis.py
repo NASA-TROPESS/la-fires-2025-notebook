@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
 from enum import IntEnum
 import json
-from netCDF4 import Dataset
 import numpy as np
 import os
 import pandas as pd
 from pathlib import Path
+import xarray as xr
 
 from . import enhancement_ratios
 
@@ -164,7 +164,7 @@ class ViirsMultiJsonFrpProvider(ViirsFrpProvider):
 
 class GoesFrpProvider(FrpProvider):
     def __init__(self, goes_file: os.PathLike) -> None:
-        self.df = self.load_goes(goes_file)
+        self.ds = self.load_goes(goes_file)
 
     @classmethod
     def from_scene(cls, scene_name, subscene_name, goes_summary_dir: os.PathLike) -> 'GoesFrpProvider':
@@ -172,40 +172,56 @@ class GoesFrpProvider(FrpProvider):
         return cls(goes_file)
 
     def daily_frps(self, subscene_extent: Tuple[float, float, float, float], local_hour_limits: Tuple[float, float], tz='-08:00') -> pd.DataFrame:
-        local_hours = _dti_to_local_hours(self.df.index, tz)
+        local_hours = _dti_to_local_hours(pd.to_datetime(self.ds.time).tz_localize('utc'), tz)
         t1, t2 = local_hour_limits
         x1, x2, y1, y2 = subscene_extent
         tt = (local_hours >= t1) & (local_hours <= t2)
-        xx = (self.df.longitude >= x1) & (self.df.longitude <= x2)
-        yy = (self.df.latitude >= y1) & (self.df.latitude <= y2)
-        subscene_frp = self.df.loc[tt & xx & yy, 'frp']
+        xx = (self.ds.lon >= x1) & (self.ds.lon <= x2)
+        yy = (self.ds.lat >= y1) & (self.ds.lat <= y2)
+        subscene_frp = self.ds.frp.sel(time=tt, pixel=xx & yy)
 
-        dates = subscene_frp.index.tz_convert(tz).date
-        grouped_frp = subscene_frp.groupby(dates)
-        return pd.DataFrame({'mean_frp': grouped_frp.mean(), 'total_frp': grouped_frp.sum(), 'n_frp': grouped_frp.count()})
+        # Get the average values for the pixels for each day, then sum/average that.
+        # This is more comparable to VIIRS, especially for summing, since otherwise
+        # the greater number of GOES time slices will mess up the sum
+        dates = pd.to_datetime(subscene_frp.time).tz_localize('utc').tz_convert('-08:00').date
+        dates = xr.DataArray(dates, dims=['time'], coords=[subscene_frp.time])
+        grouped_frp = subscene_frp.groupby(dates).mean()
+        data = {
+            'mean_frp': grouped_frp.mean(dim='pixel').to_numpy(),
+            'total_frp': grouped_frp.sum(dim='pixel').to_numpy(),
+            'n_frp': grouped_frp.count(dim='pixel').to_numpy()
+        }
+        return pd.DataFrame(data, index=pd.to_datetime(grouped_frp.group))
 
     @staticmethod
     def load_goes(goes_file, allowed_mask_values=np.array([10,12,13,14,30,32,33,34])):
-        with Dataset(goes_file) as ds:
-            time = ds['time'][:]
-            lat = ds['lat'][:].filled(np.nan)
-            lon = ds['lon'][:].filled(np.nan)
-            mask = ds['Mask'][:]
-            frp = ds['Power'][:]
+        with xr.open_dataset(goes_file) as ds:
+            lats = ds['lat']
+            lons = ds['lon']
+            frp = ds['Power']
+            mask = ds['Mask']
 
-        # time is 1D so expand it to the full size before subsetting
-        time = np.broadcast_to(time.reshape(1, -1), lat.shape)
 
-        xx = np.isfinite(lon) & np.isfinite(lat)
+        # Verify that lat and lon are consistent in time
+        lat_check = np.unique(lats.diff(dim='time'))
+        assert np.allclose(lat_check, 0.0)
+        lon_check = np.unique(lons.diff(dim='time'))
+        assert np.allclose(lon_check, 0.0)
+
+        lats = lats.isel(time=0)
+        lons = lons.isel(time=0)
+
+        # Remove data we aren't retaining, then limit to pixels with at least
+        # one actual FRP value
         mm = np.isin(mask, allowed_mask_values)
+        frp.data[~mm] = np.nan
 
-        time = pd.Timestamp(1970,1,1) + pd.to_timedelta(time[xx & mm], unit='s')
-        lat = lat[xx & mm]
-        lon = lon[xx & mm]
-        frp = frp[xx & mm]
+        xx = ~(np.isnan(frp).all(dim='time'))
+        frp = frp.sel(pixel=xx)
+        lats = lats.sel(pixel=xx)
+        lons = lons.sel(pixel=xx)
 
-        df = pd.DataFrame({'latitude': lat, 'longitude': lon, 'frp': frp}, index=time.tz_localize('utc'))
-        return df.dropna()
+        return xr.Dataset({'frp': frp, 'lat': lats, 'lon': lons})
 
 
 class GoesMultiSceneFrpProvider(FrpMultiSceneProvider):
