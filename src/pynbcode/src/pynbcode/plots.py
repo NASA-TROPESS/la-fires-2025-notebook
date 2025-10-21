@@ -135,7 +135,7 @@ def binned_box_plots(df: pd.DataFrame, xcol: str, ycol: str, bin_edges: Union[in
         values_fit = jstats.PolyFitModel(x=df[xcol].to_numpy(), xerr=xerr, y=df[ycol].to_numpy(), yerr=yerr, model=fit_model)
         value_fit_plot_kws = dict() if value_fit_plot_kws is None else value_fit_plot_kws
         value_fit_plot_kws.setdefault('color', 'tab:blue')
-        value_fit_plot_kws.setdefault('label', f'York fit, indiv. days: ${_to_sci_notation(values_fit.yint)} + {_to_sci_notation(values_fit.slope)}x$')
+        value_fit_plot_kws.setdefault('label', f'York fit, indiv. points: ${_to_sci_notation(values_fit.yint)} + {_to_sci_notation(values_fit.slope)}x$')
         values_fit.plot_fit(ax, **value_fit_plot_kws)
     if fit_bins:
         bin_meds = np.array([np.median(y) for y in bin_y])
@@ -153,7 +153,7 @@ def binned_box_plots(df: pd.DataFrame, xcol: str, ycol: str, bin_edges: Union[in
     hexbin_kws.setdefault('bins', 'log')
     hexbin_kws.setdefault('cmap', 'pink_r')
     h = ax.hexbin(df[xcol].to_numpy(), df[ycol].to_numpy(), **hexbin_kws)
-    plt.colorbar(h)
+    plt.colorbar(h, label='# points')
 
     ax.set_xlabel(xcol)
     ax.set_ylabel(ycol)
@@ -189,34 +189,15 @@ def er_vs_frp_box_plots(fire_df: pd.DataFrame, bin_edges: Union[int, float, np.n
         Axes to plot into
 
     """
-    if isinstance(bin_edges, (int, float)):
-        top_edge = np.floor(fire_df[frp_column].max() / bin_edges + 2) * bin_edges
-        bin_edges = np.arange(0, top_edge, bin_edges)
-
-    bin_x = []
-    bin_y = []
-    for edge, bin_df in fire_df.groupby(pd.cut(fire_df[frp_column], bin_edges), observed=True):
-        bin_x.append(edge)
-        bin_y.append(bin_df.er.to_numpy())
-
-    x = np.array([0.5*(b.left + b.right) for b in bin_x])
-    bin_meds = np.array([np.median(y) for y in bin_y])
-    bin_stds = np.array([np.std(y, ddof=1) for y in bin_y])
-    fit_days = jstats.PolyFitModel(x=fire_df[frp_column].to_numpy(), xerr=np.ones(fire_df.shape[0]), y=fire_df.er.to_numpy(), yerr=fire_df.er_unc.to_numpy())
-    fit_bins = jstats.PolyFitModel(x=x, xerr=np.ones(x.size), y=bin_meds, yerr=bin_stds, nans='drop')
-
-    width = np.mean([0.67*(b.right - b.left) for b in bin_x])
-
     ax = ax or plt.gca()
-    ax.boxplot(bin_y, positions=x, widths=width)
-    ax.set_xticklabels(bin_x)
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
-    fit_days.plot_fit(ax, color='tab:blue', label=f'York fit, indiv. days: ${_to_sci_notation(fit_days.yint)} + {_to_sci_notation(fit_days.slope)}x$')
-    fit_bins.plot_fit(ax, color='tab:orange', label=f'York fit, bin medians: ${_to_sci_notation(fit_bins.yint)} + {_to_sci_notation(fit_bins.slope)}x$')
-    ax.grid(True)
-
-    h = ax.hexbin(fire_df[frp_column].to_numpy(), fire_df.er.to_numpy(), mincnt=1, gridsize=30, bins='log', cmap='pink_r')
-    plt.colorbar(h, label='# points')
+    binned_box_plots(
+        df=fire_df,
+        xcol=frp_column,
+        ycol='er',
+        yerr_col='er_unc',
+        bin_edges=bin_edges,
+        ax=ax
+    )
 
     if show_anderson_fit:
         ax.plot(bin_edges, 1.04e-5*bin_edges + 1.58e-4, color='r', ls=':', label='Fit from Anderson et al.: $(1.58 \\times 10^{-4}) + (1.04 \\times 10^{-5}) x$')
