@@ -1,4 +1,5 @@
 import jllutils.stats as jstats
+from loguru import logger
 import matplotlib.pyplot as plt
 from netCDF4 import Dataset
 import numpy as np
@@ -27,7 +28,7 @@ def load_enhancments(nc_file: os.PathLike) -> dict:
 
 
 
-def calculate_er_as_fit(enh_dict: dict, subscene_extent: Sequence[float], idate: Union[int, pd.Timestamp, str], min_co_enh=None, enh_group='time', model='robust', debug_plot=False):
+def calculate_er_as_fit(enh_dict: dict, subscene_extent: Sequence[float], idate: Union[int, pd.Timestamp, str], min_co_enh=None, enh_group='time', model='sk', debug_plot=False):
     if not isinstance(idate, int):
         idate = np.flatnonzero(enh_dict['date'] == idate).item()
 
@@ -44,6 +45,7 @@ def calculate_er_as_fit(enh_dict: dict, subscene_extent: Sequence[float], idate:
     if np.sum(xx) == 0:
         return {'er': np.nan, 'er_unc': np.nan, 'intercept': np.nan, 'intercept_unc': np.nan}
 
+    logger.debug(f'Fitting NO2:CO slope with "{model}" polyfit model')
     fit = jstats.PolyFitModel(x=co[xx], y=no2[xx], model=model)
 
     if debug_plot:

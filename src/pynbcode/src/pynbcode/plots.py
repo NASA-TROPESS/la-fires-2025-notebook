@@ -1,6 +1,7 @@
 import cartopy.crs as ccrs
 import cartopy.feature as cfeat
 from cartopy.io import shapereader
+from loguru import logger
 import matplotlib.pyplot as plt
 from netCDF4 import Dataset
 import numpy as np
@@ -9,10 +10,10 @@ import re
 
 import jllutils.stats as jstats
 
+from .constants import STD_CO_ENH
+
 from typing import Optional, Tuple, Union
 
-
-STD_CO_ENH = 0.03 # mol/m2
 
 class PlumeMask:
     def __init__(self, enhancement_file: str, enhancement_group: str = 'Time', co_enhancement_threshold: float = STD_CO_ENH) -> None:
@@ -109,9 +110,10 @@ def plot_gridded_data(
         return ax
 
 
-def binned_box_plots(df: pd.DataFrame, xcol: str, ycol: str, bin_edges: Union[int, float, np.ndarray], add_hexbin: bool = True,
-                     fit_values: bool = True, xerr_col: Optional[str] = None, fit_bins: bool = True, yerr_col: Optional[str] = None,
-                     use_point=False, hexbin_kws=None, value_fit_plot_kws=None, bin_fit_plot_kws=None, fit_model='york', ax=None):
+def binned_box_plots(df: pd.DataFrame, xcol: str, ycol: str, bin_edges: Union[int, float, np.ndarray], add_hexbin: bool = False, add_points: bool = False,
+                     fit_values: bool = True, xerr_col: Optional[str] = None, fit_bins: bool = False, yerr_col: Optional[str] = None,
+                     use_point=False, bin_plot_kws=None, hexbin_kws=None, point_kws=None, value_fit_plot_kws=None, bin_fit_plot_kws=None, set_bin_xticks=True, fit_model='sk',
+                     fit_x=None, ax=None):
     if isinstance(bin_edges, (int, float)):
         top_edge = np.floor(df[xcol].max() / bin_edges + 2) * bin_edges
         bin_edges = np.arange(0, top_edge, bin_edges)
@@ -123,51 +125,74 @@ def binned_box_plots(df: pd.DataFrame, xcol: str, ycol: str, bin_edges: Union[in
         bin_y.append(bin_df[ycol].to_numpy())
 
     x = np.array([0.5*(b.left + b.right) for b in bin_x])
+    if fit_x is None:
+        fit_x = np.array([0.5*(bin_edges[i] + bin_edges[i+1]) for i in range(np.size(bin_edges)-1)])
     width = np.mean([0.67*(b.right - b.left) for b in bin_x])
     bin_meds = np.array([np.median(y) for y in bin_y])
     bin_stds = np.array([np.std(y, ddof=1) for y in bin_y])
 
     ax = ax or plt.gca()
+    bin_plot_kws = dict() if bin_plot_kws is None else bin_plot_kws.copy()
     if use_point:
-        ax.errorbar(x, bin_meds, yerr=bin_stds, fmt='ko', ecolor='k')
+        bin_plot_kws.setdefault('color', 'k')
+        bin_plot_kws.setdefault('marker', 'o')
+        bin_plot_kws.setdefault('ls', 'none')
+        bin_plot_kws.setdefault('ecolor', 'k')
+        ax.errorbar(x, bin_meds, yerr=bin_stds, **bin_plot_kws)
     else:
-        ax.boxplot(bin_y, positions=x, widths=width)
-    ax.set_xticks(x)
-    ax.set_xticklabels(bin_x)
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
+        ax.boxplot(bin_y, positions=x, widths=width, **bin_plot_kws)
+
+    if set_bin_xticks:
+        ax.set_xticks(x)
+        ax.set_xticklabels(bin_x)
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
+
     if fit_values:
         xerr = df[xerr_col].to_numpy() if xerr_col else np.ones(df.shape[0])
         yerr = df[yerr_col].to_numpy() if yerr_col else np.ones(df.shape[0])
+        logger.debug(f'Fitting individual values with "{fit_model}" polyfit model')
         values_fit = jstats.PolyFitModel(x=df[xcol].to_numpy(), xerr=xerr, y=df[ycol].to_numpy(), yerr=yerr, model=fit_model, nans='drop')
         value_fit_plot_kws = dict() if value_fit_plot_kws is None else value_fit_plot_kws
-        value_fit_plot_kws.setdefault('color', 'tab:blue')
-        value_fit_plot_kws.setdefault('label', f'York fit, indiv. points: ${_to_sci_notation(values_fit.yint)} + {_to_sci_notation(values_fit.slope)}x$')
-        fit_y = values_fit.predict(x)
-        ax.plot(x, fit_y, **value_fit_plot_kws)
+        value_fit_plot_kws.setdefault('color', 'tab:red')
+        value_fit_plot_kws.setdefault('label', f'Fit to indiv. points: ${_to_sci_notation(values_fit.yint)} + {_to_sci_notation(values_fit.slope)}x$')
+        fit_y = values_fit.predict(fit_x)
+        ax.plot(fit_x, fit_y, **value_fit_plot_kws)
     if fit_bins:
+        logger.debug(f'Fitting bins with "{fit_model}" polyfit model')
         bins_fit = jstats.PolyFitModel(x=x, xerr=np.ones(x.size), y=bin_meds, yerr=bin_stds, model=fit_model, nans='drop')
         bin_fit_plot_kws = dict() if bin_fit_plot_kws is None else bin_fit_plot_kws
         bin_fit_plot_kws.setdefault('color', 'tab:orange')
-        bin_fit_plot_kws.setdefault('label', f'York fit, bin medians: ${_to_sci_notation(bins_fit.yint)} + {_to_sci_notation(bins_fit.slope)}x$')
-        fit_y = bins_fit.predict(x)
-        ax.plot(x, fit_y, **bin_fit_plot_kws)
+        bin_fit_plot_kws.setdefault('label', f'Fit to bin medians: ${_to_sci_notation(bins_fit.yint)} + {_to_sci_notation(bins_fit.slope)}x$')
+        fit_y = bins_fit.predict(fit_x)
+        ax.plot(fit_x, fit_y, **bin_fit_plot_kws)
     ax.grid(True)
 
     if add_hexbin:
-        hexbin_kws = dict() if hexbin_kws is None else hexbin_kws
+        hexbin_kws = dict() if hexbin_kws is None else hexbin_kws.copy()
         hexbin_kws.setdefault('mincnt', 1)
         hexbin_kws.setdefault('gridsize', 30)
         hexbin_kws.setdefault('bins', 'log')
         hexbin_kws.setdefault('cmap', 'pink_r')
         h = ax.hexbin(df[xcol].to_numpy(), df[ycol].to_numpy(), **hexbin_kws)
         plt.colorbar(h, label='# points')
+    if add_points:
+        point_kws = dict() if point_kws is None else point_kws.copy()
+        point_kws.setdefault('color', 'royalblue')
+        point_kws.setdefault('ecolor', 'lightskyblue')
+        point_kws.setdefault('ls', 'none')
+        point_kws.setdefault('marker', '.')
+        point_kws.setdefault('zorder', 1.5)
+        point_kws.setdefault('alpha', 0.25)
+        ax.errorbar(x=df[xcol].to_numpy(), y=df[ycol].to_numpy(), yerr=df[yerr_col].to_numpy(), **point_kws)
+
 
     ax.set_xlabel(xcol)
     ax.set_ylabel(ycol)
+    return bin_edges
 
 
 
-def er_vs_frp_box_plots(fire_df: pd.DataFrame, bin_edges: Union[int, float, np.ndarray] = 25, frp_column: str = 'mean_frp', show_anderson_fit=True, ax=None):
+def er_vs_frp_box_plots(fire_df: pd.DataFrame, bin_edges: Union[int, float, np.ndarray] = 25, frp_column: str = 'mean_frp', show_anderson_fit=True, ax=None, **inner_kws):
     """Plot NO2:CO enhancement ratios vs. fire radiative power as a series of boxplots
 
     This aims to reproduce Anderson et al. (2023) Fig. 3c (doi.org/10.1029/2023GL105811).
@@ -197,17 +222,19 @@ def er_vs_frp_box_plots(fire_df: pd.DataFrame, bin_edges: Union[int, float, np.n
 
     """
     ax = ax or plt.gca()
-    binned_box_plots(
+    bin_edges = binned_box_plots(
         df=fire_df,
         xcol=frp_column,
         ycol='er',
         yerr_col='er_unc',
         bin_edges=bin_edges,
-        ax=ax
+        ax=ax,
+        **inner_kws
     )
 
     if show_anderson_fit:
-        ax.plot(bin_edges, 1.04e-5*bin_edges + 1.58e-4, color='r', ls=':', label='Fit from Anderson et al.: $(1.58 \\times 10^{-4}) + (1.04 \\times 10^{-5}) x$')
+        fit_x = inner_kws.get('fit_x', bin_edges)
+        ax.plot(fit_x, 1.04e-5*fit_x + 1.58e-4, color='r', ls=':', label='Fit from Anderson et al.: $(1.58 \\times 10^{-4}) + (1.04 \\times 10^{-5}) x$')
 
     ax.legend(loc='lower center', bbox_to_anchor=(0.5, 1.05))
     ax.set_xlabel('FRP bin (MW)')
