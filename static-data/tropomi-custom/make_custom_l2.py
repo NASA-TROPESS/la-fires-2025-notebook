@@ -1,12 +1,17 @@
+from abc import ABC, abstractmethod
 from argparse import ArgumentParser
-from netCDF4 import Dataset
+from datetime import datetime
+from netCDF4 import Dataset, num2date
 import numpy as np
 from pathlib import Path
 import pandas as pd
+from pynbcode.tropomi.priors import load_tropomi_no2_priors
+from pynbcode.tropess.tropess_data import load_muses_cols
 from scipy.interpolate import LinearNDInterpolator
 
-
 STATIC_DATA_DIR = Path(__file__).parent.parent
+TROPOMI_PRIORS_DIR = STATIC_DATA_DIR / 'tropomi' / 'l2' / 'no2_prior'
+TROPESS_DATA_DIR = STATIC_DATA_DIR / 'tropess'
 LA_CUSTOM_RET_EXTENT = [-120.0, -116.0, 32.0, 36.0]
 
 VARIABLES = {
@@ -58,8 +63,8 @@ def main():
     for date in dates:
         print(f'Processing {date:%Y-%m-%d}')
         tropomi_l2_data, tropomi_l2_files = load_tropomi_l2_data(date, LA_CUSTOM_RET_EXTENT)
-        tropess_interp = TropessLatLonPresInterp.for_date('CO', date)
-        tropomi_fire_data = compute_fire_l2_no2(tropomi_l2_data, tropess_interp)
+        profile_interp = ComboLatLonPresInterp.for_date(date)
+        tropomi_fire_data = compute_fire_l2_no2(tropomi_l2_data, profile_interp)
         tropomi_l2_data.update(tropomi_fire_data)
         write_custom_tropomi_l2_file(
             date=date,
@@ -71,34 +76,101 @@ def main():
 
 def parse_args():
     p = ArgumentParser('Generate custom TROPOMI NO2 files for LA fires')
-    p.add_argument('start_date', default='2025-01-01', nargs='?', help='First date to process, default = %(default)s')
-    p.add_argument('end_date', default='2025-01-10', nargs='?', help='Last date to process, default = %(default)s')
+    p.add_argument('start_date', default='2025-01-08', nargs='?', help='First date to process, default = %(default)s')
+    p.add_argument('end_date', default='2025-01-09', nargs='?', help='Last date to process, default = %(default)s')
     p.add_argument('--remove-existing', action='store_true', help='Remove existing files for dates processed')
     p.add_argument('--pdb', action='store_true', help='Launch Python debugger')
     return p.parse_args()
 
 
-class TropessLatLonPresInterp:
-    def __init__(self, lon, lat, pres, values):
-        pres = pres * 1e2  # TROPESS uses hPa, convert to Pa
-        self.pres_interp = self._build_interp_list(lon, lat, pres)
-        self.values_interp = self._build_interp_list(lon, lat, values)
+class LatLonPresInterp(ABC):
+    @abstractmethod
+    def __call__(self, out_lon: float, out_lat: float, out_pres: np.ndarray, out_time: pd.Timestamp):
+        pass
+
+
+class TropomiPriorLatLonPresInterp:
+    """Interpolate the gridded TROPOMI priors to new longitudes, latitudes, times, and pressure levels."""
+    def __init__(self, time: pd.DatetimeIndex, lon: np.ndarray, lat: np.ndarray, pres: np.ndarray, values: np.ndarray):
+        assert np.all(np.diff(lon) > 0)
+        assert np.all(np.diff(lat) > 0)
+        assert np.all(np.diff(time.to_julian_date()) > 0)
+
+        self.time = time
+        self.lon = lon
+        self.lat = lat
+        self.pres = pres
+        self.values = values
 
     @classmethod
-    def for_date(cls, species, date, step=0):
-        data = load_tropess_profiles(species, date, step=step)
-        return cls(lon=data['lon'], lat=data['lat'], pres=data['p'], values=data['x'])
+    def for_date(cls, date: datetime, priors_root=TROPOMI_PRIORS_DIR):
+        next_date = date + pd.Timedelta(days=1)
+        pattern = f'S5P_OPER_AUX_CTMANA_{date:%Y%m%d}T000000_{next_date:%Y%m%d}T000000_*.nc'
+        possible_files = list(Path(priors_root).glob(pattern))
+        if len(possible_files) != 1:
+            raise FileNotFoundError(f'No unique priors file found for {date}, list of files matching the glob was: {possible_files}')
 
-    def _build_interp_list(self, lon, lat, z):
-        interp = []
-        coords = np.stack([lon, lat], axis=1)
-        for i in range(z.shape[1]):
-            # We don't want to just remove levels with fills for some soundings,
-            # since that would make the intepolator potentially fill those in
-            # with soundings from much further away.
-            this_z = self._fill_fills(z[:,i])
-            interp.append(LinearNDInterpolator(coords, this_z))
-        return interp
+        data = load_tropomi_no2_priors(possible_files[0])
+        return cls(time=data['time'], lon=data['lon'], lat=data['lat'], pres=data['pres'], values=data['no2'])
+
+    def __call__(self, out_lon: float, out_lat: float, out_pres: np.ndarray, out_time: pd.Timestamp):
+        if out_lon < self.lon.min() or out_lat > self.lon.max():
+            raise ValueError('out_lon is out of domain')
+        if out_lat < self.lat.min() or out_lat > self.lat.max():
+            raise ValueError('out_lat is out of domain')
+        if out_time < self.time.min() or out_time > self.time.max():
+            raise ValueError('out_time is out of domain')
+
+        ilon = np.flatnonzero(self.lon < out_lon).max()
+        ilat = np.flatnonzero(self.lat < out_lat).max()
+        itime = np.flatnonzero(self.time < out_time).max()
+
+        profiles = np.full([8, out_pres.size], np.nan)
+        coords = np.full([8, 3], np.nan)
+
+
+        iprof = -1
+        for jlon in [ilon, ilon+1]:
+            this_lon = self.lon[jlon]
+            for jlat in [ilat, ilat+1]:
+                this_lat = self.lat[jlat]
+                for jtime in [itime, itime+1]:
+                    iprof += 1
+                    this_time = self.time[jtime]
+
+
+                    # Ensure we are pressure sorted so np.interp can extrapolate correctly.
+                    p = self.pres[jtime, :, jlat, jlon]
+                    x = self.values[jtime, :, jlat, jlon]
+                    ii = np.argsort(p)
+                    p = p[ii]
+                    x = x[ii]
+                    coords[iprof, 0] = this_lon
+                    coords[iprof, 1] = this_lat
+                    coords[iprof, 2] = this_time.to_julian_date()
+                    profiles[iprof] = np.interp(np.log(out_pres), np.log(p), x)
+
+        final_profile = np.full(out_pres.size, np.nan)
+        out_jtime = out_time.to_julian_date()
+        for ilev in range(out_pres.size):
+            interp = LinearNDInterpolator(coords, profiles[:,ilev])
+            final_profile[ilev] = interp(out_lon, out_lat, out_jtime)
+        return final_profile
+
+
+class TropessLatLonPresInterp:
+    """Interpolate TROPESS posterior VMR profiles to new latitude, longitude, and pressure levels."""
+    def __init__(self, lon, lat, pres, values):
+        self.lon = lon
+        self.lat = lat
+        self.pres = pres
+        self.values = values
+
+    @classmethod
+    def for_date(cls, species, date, step=0, tropess_dir=TROPESS_DATA_DIR):
+        data = load_muses_cols(tropess_dir, species, date, step=step)
+        # TROPESS uses hPa, convert to Pa
+        return cls(lon=data['lon'], lat=data['lat'], pres=data['p'] * 1e2, values=data['x'])
 
     @classmethod
     def _fill_fills(cls, this_z):
@@ -106,22 +178,66 @@ class TropessLatLonPresInterp:
         is_good = this_z > -990
         return np.interp(x, x[is_good], this_z[is_good])
 
-    def __call__(self, out_lon, out_lat, out_pres):
-        # Interpolate in x-y first. Not hydrostatically conserving, but easy.
-        p = np.full(len(self.pres_interp), np.nan)
-        x = np.full_like(p, np.nan)
 
-        for i in range(p.size):
-            p[i] = self.pres_interp[i](out_lon, out_lat)
-            x[i] = self.values_interp[i](out_lon, out_lat)
+    def __call__(self, out_lon, out_lat, out_pres, out_time):
+        # Just do all of the profiles. We're using a small domain for this study,
+        # so it's not that much extra computation. If it becomes an issue, we can
+        # pick the 10 closest profiles or something.
+        new_profiles = np.full([self.lon.size, out_pres.size], np.nan)
 
-        # Ensure we are pressure sorted so np.interp can extrapolate correctly.
-        ii = np.argsort(p)
-        p = p[ii]
-        x = x[ii]
+        # Ignore time - we should have cut down to the daytime values anyway
+        coords = np.stack([self.lon, self.lat], axis=1)
 
-        # Use numpy interpolation because it does outside fill values more easily
-        return np.interp(out_pres, p, x)
+        for iprof in range(self.lon.size):
+            if np.all(self.pres[iprof] < 0) or np.all(self.values[iprof] < 0):
+                continue
+            p = self._fill_fills(self.pres[iprof])
+            x = self._fill_fills(self.values[iprof])
+
+            # Ensure we are pressure sorted so np.interp can extrapolate correctly.
+            ii = np.argsort(p)
+            p = p[ii]
+            x = x[ii]
+
+            # Use numpy interpolation because it does outside fill values as constant
+            # value extrapolation
+            new_profiles[iprof] = np.interp(np.log(out_pres), np.log(p), x)
+
+        is_all_bad = np.all(np.isnan(new_profiles), axis=1)
+        new_profiles = new_profiles[~is_all_bad]
+        coords = coords[~is_all_bad]
+        final_profile = np.full(out_pres.size, np.nan)
+        for ilev in range(out_pres.size):
+            interp = LinearNDInterpolator(coords, new_profiles[:,ilev])
+            final_profile[ilev] = interp(out_lon, out_lat)
+        return final_profile
+
+
+class ComboLatLonPresInterp:
+    """Interpolate a mixture of the TROPESS CO posteriors and TROPOMI NO2 priors to new coordinates."""
+    def __init__(self, tropess_interp: TropessLatLonPresInterp, tropomi_interp: TropomiPriorLatLonPresInterp):
+        self.tropess_interp = tropess_interp
+        self.tropomi_interp = tropomi_interp
+
+    @classmethod
+    def for_date(cls, date):
+        tropess = TropessLatLonPresInterp.for_date('CO', date)
+        tropomi = TropomiPriorLatLonPresInterp.for_date(date)
+        return cls(tropess_interp=tropess, tropomi_interp=tropomi)
+
+    def __call__(self, out_lon, out_lat, out_pres, out_time):
+        tropess_profile = self.tropess_interp(
+            out_lon=out_lon, out_lat=out_lat, out_pres=out_pres, out_time=out_time
+        )
+        tropess_profile /= tropess_profile.max()
+
+        tropomi_profile = self.tropomi_interp(
+            out_lon=out_lon, out_lat=out_lat, out_pres=out_pres, out_time=out_time
+        )
+        tropomi_profile /= tropomi_profile.max()
+
+        return 0.5 * (tropess_profile + tropomi_profile)
+
 
 
 def load_tropess_profiles(species, date, step=0):
@@ -145,6 +261,7 @@ def load_tropomi_l2_data(date, extents):
     fixed_data = {k: None for k in FIXED_VARIABLES}
     x1, x2, y1, y2 = extents
 
+    delta_time_units = None
     for f in files:
         with Dataset(f) as ds:
             this_data = dict()
@@ -163,6 +280,7 @@ def load_tropomi_l2_data(date, extents):
                 delta_time = this_data['delta_time'][:,:,np.newaxis]
                 assert delta_time.mask is np.False_  # if it were to have masked elements, we need to broadcast the mask separately
                 this_data['delta_time'] = np.broadcast_to(delta_time, this_data['lon'].shape, subok=True)
+                delta_time_units = ds[VARIABLES['delta_time']].units
 
 
         xx = (this_data['lon'] >= x1) & (this_data['lon'] <= x2)
@@ -186,6 +304,9 @@ def load_tropomi_l2_data(date, extents):
         data['tm5_b'],
     )
 
+    time_strings = [num2date(dt, delta_time_units).isoformat() for dt in data['delta_time']]
+    data['time'] = pd.to_datetime(time_strings)
+
     return data, files
 
 
@@ -202,9 +323,9 @@ def _compute_tropomi_pres_edges(surf_p, a, b):
     return edges
 
 
-def compute_pres_weighted_prof(lon: float, lat: float, pres_edges: np.ma.MaskedArray, tropess_interp: TropessLatLonPresInterp):
+def compute_pres_weighted_prof(lon: float, lat: float, pres_edges: np.ma.MaskedArray, time: pd.Timestamp, profile_interp: LatLonPresInterp):
     pres_centers = np.ma.mean(pres_edges, axis=1)
-    tropess_x = tropess_interp(lon, lat, pres_centers)
+    tropess_x = profile_interp(lon, lat, pres_centers, time)
 
     pres_thicknesses = np.abs(np.ma.diff(pres_edges, axis=1)).squeeze()
     pres_weights = pres_thicknesses / np.ma.sum(pres_thicknesses)
@@ -214,13 +335,14 @@ def compute_pres_weighted_prof(lon: float, lat: float, pres_edges: np.ma.MaskedA
 def compute_fire_amf(
     lon: float,
     lat: float,
+    time: pd.Timestamp,
     tropomi_pres_edges: np.ndarray,
     tropomi_ak: np.ndarray,
     tropomi_amf_tot: float,
     tropomi_i_tropopause: int,
-    tropess_interp: TropessLatLonPresInterp
+    profile_interp: LatLonPresInterp
 ):
-    new_x = compute_pres_weighted_prof(lon=lon, lat=lat, pres_edges=tropomi_pres_edges, tropess_interp=tropess_interp)
+    new_x = compute_pres_weighted_prof(lon=lon, lat=lat, pres_edges=tropomi_pres_edges, time=time, profile_interp=profile_interp)
     tropomi_sw = tropomi_ak * tropomi_amf_tot
     fire_amf_tot = np.ma.sum(tropomi_sw * new_x) / np.ma.sum(new_x)
     # The ATBD says the the tropospheric AMF includes the tropopause level.
@@ -234,7 +356,7 @@ def compute_fire_amf(
     return fire_amf_trop.item(), fire_amf_tot.item(), new_x
 
 
-def compute_fire_l2_no2(tropomi_l2_data: dict, tropess_interp: TropessLatLonPresInterp):
+def compute_fire_l2_no2(tropomi_l2_data: dict, profile_interp: LatLonPresInterp):
     fire_data = {
         'no2_trop': np.ma.masked_all_like(tropomi_l2_data['no2_trop']),
         'amf_trop': np.ma.masked_all_like(tropomi_l2_data['amf_trop']),
@@ -242,15 +364,18 @@ def compute_fire_l2_no2(tropomi_l2_data: dict, tropess_interp: TropessLatLonPres
         'profile_shape': np.ma.masked_all_like(tropomi_l2_data['ak']),
     }
 
-    for i in range(tropomi_l2_data['lat'].size):
+    n = tropomi_l2_data['lat'].size
+    for i in range(n):
+        print(f'\rProcessing {i+1}/{n}', end='')
         amf_trop_fire, amf_tot_fire, new_prof_shape = compute_fire_amf(
             lon=tropomi_l2_data['lon'][i],
             lat=tropomi_l2_data['lat'][i],
+            time=tropomi_l2_data['time'][i],
             tropomi_pres_edges=tropomi_l2_data['pres_edges'][i],
             tropomi_ak=tropomi_l2_data['ak'][i],
             tropomi_amf_tot=tropomi_l2_data['amf_total'][i],
             tropomi_i_tropopause=tropomi_l2_data['tropopause_index'][i],
-            tropess_interp=tropess_interp
+            profile_interp=profile_interp
         )
 
         fire_data['amf_trop'][i] = amf_trop_fire
@@ -277,6 +402,8 @@ def write_custom_tropomi_l2_file(date: pd.Timestamp, l2_data: dict, template_fil
 
     now = pd.Timestamp.now('utc')
     filename = f'S5P_CUST_L2__NO2____{date:%Y%m%d}T000000_{date:%Y%m%d}T000000_XXXXX_YY_ZZZZZZ_{now:%Y%m%dT%H%M%S}.nc'
+    if not dest_dir.exists():
+        dest_dir.mkdir(parents=True)
     file = dest_dir / filename
     with Dataset(file, 'w') as ds, Dataset(template_file) as temp:
         ds.createGroup('PRODUCT')
