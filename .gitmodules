@@ -4,3 +4,6 @@
 [submodule "src/OversampledGridding.jl"]
 	path = src/OversampledGridding.jl
 	url = ../OversampledGridding.jl.git
+[submodule "src/jllutils"]
+	path = src/jllutils
+	url = ../JLL-Py-Utils.git
