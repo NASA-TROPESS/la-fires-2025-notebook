@@ -91,8 +91,8 @@ class FrpProvider(ABC):
         pd.DataFrame
             A dataframe, indexed by date, with FRP statistics for this scene/subscene. The specific statistics may vary
             depending on the concrete implementation, but it is recommened to include columns "mean_frp" as the average
-            of FRP data within the subscene, "total_frp" as the sum of FRP data in the subscene, and "n_frp" as the number
-            of FRP observations within the subscene.
+            of FRP data within the subscene, "total_frp" as the sum of FRP data in the subscene, "mean_areal_frp"/"total_areal_frp"
+            as the previous two normalized by pixel or fire area, and "n_frp" as the number of FRP observations within the subscene.
         """
         pass
 
@@ -118,7 +118,10 @@ class ViirsFrpProvider(FrpProvider, FrpMultiSceneProvider):
         xx_hr = (local_hours >= local_hour_limits[0]) & (local_hours <= local_hour_limits[1])
         xx_conf = self.df.confidence >= self._min_confidence_level
 
-        subset_frp = self.df.loc[xx_lon & xx_lat & xx_hr & xx_conf, 'frp']
+        xx = xx_lon & xx_lat & xx_hr & xx_conf
+        subset_frp = self.df.loc[xx, 'frp']
+        subset_area = self.df.loc[xx, 'area']
+        subset_areal_frp = subset_frp / subset_area
 
         logger.debug(f'{(xx_lon & xx_lat).sum()/self.df.shape[0]:.2%} VIIRS obs. retained by lat/lon bounds')
         logger.debug(f'{xx_hr.sum()/self.df.shape[0]:.2%} VIIRS obs. retained by local hour bounds')
@@ -127,7 +130,14 @@ class ViirsFrpProvider(FrpProvider, FrpMultiSceneProvider):
 
         dates = subset_frp.index.tz_convert(tz).date
         grouped_frp = subset_frp.groupby(dates)
-        return pd.DataFrame({'mean_frp': grouped_frp.mean(), 'total_frp': grouped_frp.sum(), 'n_frp': grouped_frp.count()})
+        grouped_areal_frp = subset_areal_frp.groupby(dates)
+        return pd.DataFrame({
+            'mean_frp': grouped_frp.mean(),
+            'mean_areal_frp': grouped_areal_frp.mean(),
+            'total_frp': grouped_frp.sum(),
+            'total_areal_frp': grouped_areal_frp.sum(),
+            'n_frp': grouped_frp.count()
+        })
 
     def daily_frps_for_subscene(self, scene_name: str, subscene: dict, local_hour_limits: Tuple[float, float], tz='-08:00') -> pd.DataFrame:
         # Since the VIIRS JSON files aren't broken up by scenes, simply subsetting by time and location is all we need to do to 
@@ -145,6 +155,7 @@ class ViirsFrpProvider(FrpProvider, FrpMultiSceneProvider):
             json_entry['datetime'] = pd.to_datetime(f'{datestr} {timestr}', format='%Y-%m-%d %H%M', utc=True)
             json_entry['confidence'] = int(ConfidenceLevel.from_char(json_entry['confidence']))
             json_entry['is_day'] = json_entry.pop('daynight') == 'D'
+            json_entry['area'] = json_entry['scan'] * json_entry['track']
 
         return pd.DataFrame(json_list).set_index('datetime')
 
@@ -190,19 +201,38 @@ class GoesFrpProvider(FrpProvider):
         xx = (self.ds.lon >= x1) & (self.ds.lon <= x2)
         yy = (self.ds.lat >= y1) & (self.ds.lat <= y2)
         subscene_frp = self.ds.frp.sel(time=tt, pixel=xx & yy)
+        subscene_area = self.ds.area.sel(time=tt, pixel=xx & yy)
+        subscene_areal_frp = subscene_frp / subscene_area
 
         # Get the average values for the pixels for each day, then sum/average that.
         # This is more comparable to VIIRS, especially for summing, since otherwise
         # the greater number of GOES time slices will mess up the sum
         dates = pd.to_datetime(subscene_frp.time).tz_localize('utc').tz_convert('-08:00').date
         dates = xr.DataArray(dates, dims=['time'], coords=[subscene_frp.time])
-        grouped_frp = subscene_frp.groupby(dates).mean()
-        data = {
-            'mean_frp': grouped_frp.mean(dim='pixel').to_numpy(),
-            'total_frp': grouped_frp.sum(dim='pixel').to_numpy(),
-            'n_frp': grouped_frp.count(dim='pixel').to_numpy()
-        }
-        return pd.DataFrame(data, index=pd.to_datetime(grouped_frp.group))
+
+        data = dict()
+
+        if subscene_frp.size == 0:
+            data['mean_frp'] = np.nan
+            data['total_frp'] = np.nan
+            data['n_frp'] = 0
+            index = pd.to_datetime([pd.NaT])
+        else:
+            grouped_frp = subscene_frp.groupby(dates).mean()
+            data['mean_frp'] = grouped_frp.mean(dim='pixel').to_numpy()
+            data['total_frp'] = grouped_frp.sum(dim='pixel').to_numpy()
+            data['n_frp'] = grouped_frp.count(dim='pixel').to_numpy()
+            index = pd.to_datetime(grouped_frp.group)
+
+        if subscene_areal_frp.size == 0:
+            data['mean_areal_frp'] = np.nan
+            data['total_areal_frp'] = np.nan
+        else:
+            grouped_areal_frp = subscene_areal_frp.groupby(dates).mean()
+            data['mean_areal_frp'] = grouped_areal_frp.mean(dim='pixel').to_numpy()
+            data['total_areal_frp'] = grouped_areal_frp.sum(dim='pixel').to_numpy()
+
+        return pd.DataFrame(data, index=index)
 
     @staticmethod
     def load_goes(goes_file, allowed_mask_values=np.array([10,12,13,14,30,32,33,34])):
@@ -211,6 +241,7 @@ class GoesFrpProvider(FrpProvider):
             lons = ds['lon']
             frp = ds['Power']
             mask = ds['Mask']
+            area = ds['Area'] * 1e-6  # convert from square meters to square kilometers
 
 
         # Verify that lat and lon are consistent in time
@@ -229,10 +260,11 @@ class GoesFrpProvider(FrpProvider):
 
         xx = ~(np.isnan(frp).all(dim='time'))
         frp = frp.sel(pixel=xx)
+        area = area.sel(pixel=xx)
         lats = lats.sel(pixel=xx)
         lons = lons.sel(pixel=xx)
 
-        return xr.Dataset({'frp': frp, 'lat': lats, 'lon': lons})
+        return xr.Dataset({'frp': frp, 'area': area, 'lat': lats, 'lon': lons})
 
 
 class GoesMultiSceneFrpProvider(FrpMultiSceneProvider):
