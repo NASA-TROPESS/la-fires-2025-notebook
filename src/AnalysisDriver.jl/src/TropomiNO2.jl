@@ -7,6 +7,13 @@ using NCDatasets
 using OversampledGridding
 
 function tropomi_no2_config(prior_file)
+    init_fxn = nothing
+    data_fxn = nothing
+    if !isnothing(prior_file)
+        init_fxn = () -> no2_prior_data_init_fxn(prior_file)
+        data_fxn = (data) -> sample_no2_prior_data(data, prior_file)
+    end
+
     return GridConfig(
         space_dims=["scanline", "ground_pixel"],
         time_dim="time",
@@ -27,8 +34,8 @@ function tropomi_no2_config(prior_file)
             "lon" => "PRODUCT/longitude",
             "lat" => "PRODUCT/latitude",
         ),
-        extra_data_init_fxn=() -> no2_prior_data_init_fxn(prior_file),
-        extra_data_fxn=(data) -> sample_no2_prior_data(data, prior_file)
+        extra_data_init_fxn=init_fxn,
+        extra_data_fxn=data_fxn
     )
 end
 
