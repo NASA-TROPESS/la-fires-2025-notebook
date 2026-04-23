@@ -1,14 +1,18 @@
 import cartopy.crs as ccrs
 from loguru import logger
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 from netCDF4 import Dataset
 import numpy as np
 import pandas as pd
 import re
+from shapely.geometry import Point, Polygon
 
+import jllutils.plots as jplt
 import jllutils.stats as jstats
 
 from .constants import STD_CO_ENH
+from .er_frp_analysis import FrpProvider
 from .plot_utils import add_features
 # Import for convenience re-export
 from .tropess.tropess_plots import *
@@ -43,6 +47,7 @@ def plot_gridded_data(
     cblabel: str = "",
     extent: Optional[Tuple[float, float, float, float]] = None,
     plume_mask: Optional['PlumeMask'] = None,
+    feature_kws: dict = dict(),
     ax: Optional[plt.Axes] = None,
     **pcolormesh_kw
 ):
@@ -81,7 +86,6 @@ def plot_gridded_data(
             if match:
                 date_str = match.group(0)
                 inferred_date = pd.to_datetime(date_str)
-                # Assumes apply_mask modifies 'values' or returns a modified copy
                 plume_mask.apply_mask(values, lon, lat, inferred_date)
 
         if extent:
@@ -99,16 +103,74 @@ def plot_gridded_data(
                 subplot_kw={"projection": ccrs.PlateCarree()}
             )
 
-        # The '.T' transposes the array, matching the Julia 'values''
         mesh = ax.pcolormesh(lon, lat, values, **pcolormesh_kw)
 
         # Use the variable name as a fallback for the colorbar label
         final_cblabel = cblabel or variable
-        plt.colorbar(mesh, label=final_cblabel, ax=ax)
+        extend = jplt.cbextend(values, vmin=pcolormesh_kw.get('vmin', None), vmax=pcolormesh_kw.get('vmax', None))
+        plt.colorbar(mesh, label=final_cblabel, extend=extend, ax=ax)
 
-        add_features(ax) # Assumes this function is defined elsewhere
+        add_features(ax, **feature_kws)
 
         return ax
+
+
+
+def plot_gridded_enhancement(
+    grid_file: str,
+    date: str | pd.Timestamp,
+    variable: str,
+    vscale: float = 1.0,
+    cblabel: str = '{var} ({units})',
+    extent: Optional[Tuple[float, float, float, float]] = None,
+    plume_mask: Optional['PlumeMask'] = None,
+    feature_kws: dict = dict(),
+    ax: Optional[plt.Axes] = None,
+    **pcolormesh_kw
+):
+    with Dataset(grid_file) as ds:
+        if ds[variable].dimensions[0] == 'date':
+            file_dates = ds['date'][:]
+            if not isinstance(date, str):
+                date = date.strftime('%Y-%m-%d')
+            idate = np.flatnonzero(file_dates == date).item()
+            values = ds[variable][idate]
+        else:
+            values = ds[variable]
+        units = getattr(ds[variable], 'units', '??')
+
+        lon = ds['grid_lon'][:]
+        lat = ds['grid_lat'][:]
+
+    if plume_mask is not None:
+        date_obj = pd.to_datetime(date)
+        plume_mask.apply_mask(values, lon, lat, date_obj)
+
+    if extent:
+        lon_inds = (lon >= extent[0]) & (lon <= extent[1])
+        lat_inds = (lat >= extent[2]) & (lat <= extent[3])
+        lon = lon[lon_inds]
+        lat = lat[lat_inds]
+        # Use np.ix_ to correctly index the 2D array from 1D boolean masks
+        values = values[np.ix_(lat_inds, lon_inds)]
+
+    values = vscale * values
+
+    if ax is None:
+        _, ax = plt.subplots(
+            subplot_kw={"projection": ccrs.PlateCarree()}
+        )
+
+    mesh = ax.pcolormesh(lon, lat, values, **pcolormesh_kw)
+
+    final_cblabel = cblabel.format(var=variable, units=units)
+    extend = jplt.cbextend(values, vmin=pcolormesh_kw.get('vmin', None), vmax=pcolormesh_kw.get('vmax', None))
+    plt.colorbar(mesh, label=final_cblabel, extend=extend, ax=ax)
+
+    add_features(ax, **feature_kws)
+
+    return ax
+
 
 
 def binned_box_plots(df: pd.DataFrame, xcol: str, ycol: str, bin_edges: Union[int, float, np.ndarray], add_hexbin: bool = False, add_points: bool = False,
@@ -249,6 +311,44 @@ def _to_sci_notation(v, decimals=2, exp_cutoff=2) -> str:
     mantissa = np.round(v / 10**ex, decimals=decimals)
     # This is used in a format call, so the curly braces need escaped twice
     return f'({mantissa} \\times 10^{{{{{ex}}}}})'
+
+
+def plot_frp_timeseries(
+    provider: FrpProvider,
+    tz: str = '-08:00',
+    time_bin: str = 'h',
+    bounds: Polygon | None = None,
+    min_time: pd.Timestamp | str | None = None,
+    max_time: pd.Timestamp | str | None = None,
+    ax: plt.Axes = None,
+    **plot_kws
+):
+    fires_df = provider.detection_df()
+    local_times = fires_df.datetime.dt.tz_convert(tz).dt.tz_localize(None)
+    xx = np.ones(fires_df.shape[0], dtype=bool)
+    if bounds is not None:
+        xx &= fires_df.apply(lambda r: bounds.contains(Point(r.longitude, r.latitude)), axis=1)
+    if min_time is not None:
+        xx &= local_times >= min_time
+    if max_time is not None:
+        xx &= local_times <= max_time
+    fires_df = fires_df[xx]
+
+
+    local_time_bins = local_times.dt.round(time_bin)
+    mean_df = fires_df.groupby(local_time_bins)[['frp']].sum()
+
+    if ax is None:
+        ax = plt.gca()
+
+    plot_kws.setdefault('marker', 'o')
+    plot_kws.setdefault('color', 'black')
+    h = ax.plot(mean_df.index, mean_df.frp, **plot_kws)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M %b %d'))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=90)
+    ax.grid(True)
+    ax.set_ylabel('Summed FRP (MW)')
+    return h
 
 
 def subset_to_extent(lon, lat, values, extent):

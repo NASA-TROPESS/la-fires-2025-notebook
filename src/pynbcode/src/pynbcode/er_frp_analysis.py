@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from enum import IntEnum
 import json
 from loguru import logger
 from netCDF4 import Dataset
@@ -11,29 +10,13 @@ import xarray as xr
 
 from . import enhancement_ratios
 from .constants import STD_CO_ENH
+from .frp import polar_frp
+from .utils import ConfidenceLevel
+
 
 from typing import Sequence, Tuple, Union
 
 
-class ConfidenceLevel(IntEnum):
-    """Represents a confidence level for fire data.
-
-    Usually nominal or high confidence data are useful.
-    """
-    LOW = 0
-    NOMINAL = 1
-    HIGH = 2
-
-    @classmethod
-    def from_char(cls, c):
-        if c in 'lL':
-            return cls.LOW
-        if c in 'nN':
-            return cls.NOMINAL
-        if c in 'hH':
-            return cls.HIGH
-
-        raise ValueError(f'unknown character for fire confidence: {c}')
 
 
 class FrpMultiSceneProvider(ABC):
@@ -96,6 +79,12 @@ class FrpProvider(ABC):
         """
         pass
 
+    @abstractmethod
+    def detection_df(self) -> pd.DataFrame:
+        """Return a data frame with the datetime, latitude, longitude, and FRP of individual fire detections
+        """
+        pass
+
 
 class ViirsFrpProvider(FrpProvider, FrpMultiSceneProvider):
     """An FRP provider for VIIRS data contained in a FIRMS JSON file.
@@ -138,6 +127,10 @@ class ViirsFrpProvider(FrpProvider, FrpMultiSceneProvider):
             'total_areal_frp': grouped_areal_frp.sum(),
             'n_frp': grouped_frp.count()
         })
+
+    def detection_df(self) -> pd.DataFrame:
+        df = self.df.reset_index()[['datetime', 'latitude', 'longitude', 'frp']]
+        return polar_frp.assign_overpass_index(df)
 
     def daily_frps_for_subscene(self, scene_name: str, subscene: dict, local_hour_limits: Tuple[float, float], tz='-08:00') -> pd.DataFrame:
         # Since the VIIRS JSON files aren't broken up by scenes, simply subsetting by time and location is all we need to do to 
@@ -182,6 +175,45 @@ class ViirsMultiJsonFrpProvider(ViirsFrpProvider):
             dfs.append(self.load_viirs_json(jf))
         self.df = pd.concat(dfs)
         self._min_confidence_level = min_confidence
+
+
+class ModisFrpProvider(FrpProvider):
+    def __init__(self, source_dir: os.PathLike, min_confidence: ConfidenceLevel = ConfidenceLevel.NOMINAL):
+        hdf_files = sorted(Path(source_dir).glob('*.hdf'))
+        file_df = polar_frp.group_modis_granules_by_overpass(hdf_files)
+        self.df = polar_frp.load_modis_fires_by_overpass(file_df)
+        self.df = self.df[self.df.confidence_level >= min_confidence]
+
+    def daily_frps(self, subscene_extent: Tuple[float, float, float, float], local_hour_limits: Tuple[float, float], tz='-08:00') -> pd.DataFrame:
+        """
+        subscene_extent
+            A 4-tuple defining the min lon, max lon, min lat, and max lat for the subscene.
+
+        local_hour_limits
+            Limits on the local hours to include in the calculation. For example, ``(9, 15)`` will only include data between 9:00a and 3:00p
+            local.
+
+        tz
+            Offset from UTC to use when converting UTC time to local. Used to limit by local hour and group by date.
+
+        Returns
+        -------
+        pd.DataFrame
+            A dataframe, indexed by date, with FRP statistics for this scene/subscene. The specific statistics may vary
+            depending on the concrete implementation, but it is recommened to include columns "mean_frp" as the average
+            of FRP data within the subscene, "total_frp" as the sum of FRP data in the subscene, "mean_areal_frp"/"total_areal_frp"
+            as the previous two normalized by pixel or fire area, and "n_frp" as the number of FRP observations within the subscene.
+        """
+        raise NotImplementedError('Have not done the daily FRPs yet for MODIS, since it is not used in the ER:FRP analysis')
+
+    def detection_df(self) -> pd.DataFrame:
+        """Return a data frame with the datetime, latitude, longitude, and FRP of individual fire detections
+        """
+        df_out = self.df.rename(columns={'acquisition_time': 'datetime', 'lon': 'longitude', 'lat': 'latitude'})
+        df_out = df_out[['datetime', 'longitude', 'latitude', 'overpass_index']].copy()
+        df_out['frp'] = np.nan
+        return df_out
+
 
 
 class GoesFrpProvider(FrpProvider):
@@ -233,6 +265,19 @@ class GoesFrpProvider(FrpProvider):
             data['total_areal_frp'] = grouped_areal_frp.sum(dim='pixel').to_numpy()
 
         return pd.DataFrame(data, index=index)
+
+    def detection_df(self) -> pd.DataFrame:
+        times = np.broadcast_to(self.ds.time.to_numpy(), self.ds.frp.shape)
+        lat = np.broadcast_to(self.ds.lat.to_numpy()[:, np.newaxis], self.ds.frp.shape)
+        lon = np.broadcast_to(self.ds.lon.to_numpy()[:, np.newaxis], self.ds.frp.shape)
+        frp = self.ds.frp.to_numpy()
+
+        ii = np.isfinite(frp)
+        times = pd.to_datetime(times[ii]).tz_localize('utc')
+        lat = lat[ii]
+        lon = lon[ii]
+        frp = frp[ii]
+        return pd.DataFrame({'datetime': times, 'latitude': lat, 'longitude': lon, 'frp': frp})
 
     @staticmethod
     def load_goes(goes_file, allowed_mask_values=np.array([10,12,13,14,30,32,33,34])):

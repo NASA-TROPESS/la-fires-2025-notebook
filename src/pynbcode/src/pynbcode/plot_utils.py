@@ -1,7 +1,10 @@
 import cartopy.crs as ccrs
 import cartopy.feature as cfeat
 from cartopy.io import shapereader
+import geopandas as gpd
 import matplotlib.pyplot as plt
+import os
+from shapely import Geometry
 
 def add_features(
     ax: plt.Axes,
@@ -51,3 +54,20 @@ def add_features(
         gl = ax.gridlines(draw_labels=True, linestyle='--', alpha=0.5)
         gl.top_labels = False
         gl.right_labels = False
+
+
+def add_geometry(ax: plt.Axes, geo: Geometry, crs, **feature_kws):
+    feature = cfeat.ShapelyFeature(geo, crs, **feature_kws)
+    ax.add_feature(feature)
+
+
+def add_fire_perimeter(ax: plt.Axes, geojson_file: os.PathLike, fire_name: str, **feature_kws):
+    df = gpd.read_file(geojson_file)
+    ii = df.name.str.lower() == fire_name.lower()
+    df = df.loc[ii, :].sort_values('dateTime')
+    geo = df.iloc[-1]['geometry']
+    if df.crs.to_epsg() == 4326:
+        crs = ccrs.PlateCarree()
+    else:
+        crs = ccrs.CRS(df.crs.to_wkt())
+    add_geometry(ax, geo, crs, **feature_kws)
