@@ -6,7 +6,9 @@ import numpy as np
 import os
 import pandas as pd
 
-from typing import Sequence, Union
+from .utils import PlumeMask
+
+from typing import Optional, Sequence, Tuple, Union
 
 
 def load_enhancments(nc_file: os.PathLike) -> dict:
@@ -26,6 +28,36 @@ def load_enhancments(nc_file: os.PathLike) -> dict:
     out_dict['date'] = pd.to_datetime(out_dict['date'])
     return out_dict
 
+
+def load_enhancements_for_date(grid_file: os.PathLike, date: str | pd.Timestamp, variable: str,
+                               plume_mask: Optional[PlumeMask] = None, extent: Optional[Tuple[float, float, float, float]] = None):
+    with Dataset(grid_file) as ds:
+        if ds[variable].dimensions[0] == 'date':
+            file_dates = ds['date'][:]
+            if not isinstance(date, str):
+                date = date.strftime('%Y-%m-%d')
+            idate = np.flatnonzero(file_dates == date).item()
+            values = ds[variable][idate]
+        else:
+            values = ds[variable]
+        units = getattr(ds[variable], 'units', '??')
+
+        lon = ds['grid_lon'][:]
+        lat = ds['grid_lat'][:]
+
+    if plume_mask is not None:
+        date_obj = pd.to_datetime(date)
+        plume_mask.apply_mask(values, lon, lat, date_obj)
+
+    if extent:
+        lon_inds = (lon >= extent[0]) & (lon <= extent[1])
+        lat_inds = (lat >= extent[2]) & (lat <= extent[3])
+        lon = lon[lon_inds]
+        lat = lat[lat_inds]
+        # Use np.ix_ to correctly index the 2D array from 1D boolean masks
+        values = values[np.ix_(lat_inds, lon_inds)]
+
+    return {'lon': lon, 'lat': lat, 'values': values, 'units': units}
 
 
 def calculate_er_as_fit(enh_dict: dict, subscene_extent: Sequence[float], idate: Union[int, pd.Timestamp, str], min_co_enh=None, enh_group='time', model='sk', debug_plot=False):

@@ -22,3 +22,25 @@ def load_muses_cols(muses_root_dir: os.PathLike, species: str, date: datetime, s
             'air_columns': ds['Retrieval/Column_Air'][:,:],
             'aks': ds['AveragingKernel'][:,:,:]
         }
+
+
+def get_muses_col_values(data, column: str, col_avg: bool):
+    icol = TROPESS_COL_INDS[column]
+
+    cols = data['columns'][:, icol]
+    if col_avg:
+        cols = cols / data['air_columns'][:, icol]
+
+    cols = cols.filled(np.nan)
+    cols[cols < -990.0] = np.nan
+    return cols
+
+
+def make_filter_index(data: dict, extents: list[float], good_only: bool, day_only: bool) -> np.ndarray:
+    x1, x2, y1, y2 = extents
+    ii = (data['lon'] >= x1) & (data['lon'] <= x2) & (data['lat'] >= y1) & (data['lat'] <= y2)
+    if good_only:
+        ii &= data['quality'] == 1
+    if day_only:
+        ii &= data['day'] == 1
+    return ii

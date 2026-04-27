@@ -71,3 +71,10 @@ def add_fire_perimeter(ax: plt.Axes, geojson_file: os.PathLike, fire_name: str, 
     else:
         crs = ccrs.CRS(df.crs.to_wkt())
     add_geometry(ax, geo, crs, **feature_kws)
+
+
+def plot_box(loncorn, latcorn, ax=None, **style):
+    ax = ax or plt.gca()
+    x = [*loncorn, loncorn[0]]
+    y = [*latcorn, latcorn[0]]
+    ax.plot(x, y, **style)

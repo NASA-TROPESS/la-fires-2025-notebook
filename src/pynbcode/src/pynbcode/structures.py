@@ -1,9 +1,16 @@
 import cartopy.crs as ccrs
 from enum import IntEnum
+from jllutils import miscutils
 import geopandas as gpd
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 import numpy as np
 import pandas as pd
+from shapely import Polygon
+import shapely.plotting
+
+from .constants import ALTADENA_EXTENT
+
 
 from typing import Tuple
 
@@ -113,9 +120,36 @@ def plot_structures_hist(structures_gdf, extent=None, add_colorbar=True, ax=None
     return h
 
 
-def plot_final_perimeter(perimeters_gdf, name, ax=None):
+def altadena_structure_perimeter(structure_dmg: gpd.GeoDataFrame):
+    h, x, y = make_structure_damage_2d_hist(structure_dmg, extent=ALTADENA_EXTENT)
+    m = miscutils.flood_fill_at_coords(h, x, y, -118.15, 34.195, 20)
+    return miscutils.extract_polygon_from_mask(m, x, y)
+
+
+def plot_altadena_structure_perimeter(structure_dmg: gpd.GeoDataFrame, ax=None, **poly_kws):
+    coords = altadena_structure_perimeter(structure_dmg)
+    assert len(coords) == 1, 'Expected only a single polygon for the structure perimeter'
+    poly = Polygon(coords[0])
+    if ax is None:
+        _, ax = plt.subplots(subplot_kw={'projection': ccrs.PlateCarree()})
+    poly_kws.setdefault('add_points', False)
+    poly_kws.setdefault('facecolor', 'gray')
+    poly_kws.setdefault('edgecolor', 'black')
+    shapely.plotting.plot_polygon(poly, transform=ccrs.PlateCarree(), **poly_kws)
+
+    poly_kws.pop('add_points')
+    rect = Rectangle((0,0), 0, 0, label='Altadena structures', **poly_kws)
+    return rect
+
+
+def plot_final_perimeter(perimeters_gdf, name, ax=None, **poly_kws):
     if ax is None:
         _, ax = plt.subplots(subplot_kw={'projection': ccrs.PlateCarree()})
     sub_gdf = perimeters_gdf[perimeters_gdf.name.str.lower() == name.lower()].sort_values('acres', ascending=False)
     row = sub_gdf.iloc[0:1]
-    row.plot(ax=ax, facecolor='red', edgecolor='red', alpha=0.1, transform=ccrs.PlateCarree())
+    poly_kws.setdefault('facecolor', 'red')
+    poly_kws.setdefault('edgecolor', 'red')
+    poly_kws.setdefault('alpha', 0.1)
+    row.plot(ax=ax, transform=ccrs.PlateCarree(), **poly_kws)
+    rect = Rectangle((0,0), 0, 0, **poly_kws, label=f'{name.capitalize()} fire final perimeter')
+    return rect

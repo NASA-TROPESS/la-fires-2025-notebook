@@ -11,32 +11,15 @@ from shapely.geometry import Point, Polygon
 import jllutils.plots as jplt
 import jllutils.stats as jstats
 
-from .constants import STD_CO_ENH
+from .enhancement_ratios import load_enhancements_for_date
 from .er_frp_analysis import FrpProvider
 from .plot_utils import add_features
 # Import for convenience re-export
+from .frp.frp_plots import *
 from .tropess.tropess_plots import *
+from .utils import PlumeMask
 
 from typing import Optional, Tuple, Union
-
-
-class PlumeMask:
-    def __init__(self, enhancement_file: str, enhancement_group: str = 'Time', co_enhancement_threshold: float = STD_CO_ENH) -> None:
-        with Dataset(enhancement_file) as ds:
-            self.dates = pd.to_datetime(ds['date'][:])
-            self.lon = ds['grid_lon'][:]
-            self.lat = ds['grid_lat'][:]
-            co_enh = ds[enhancement_group]['co_enhancement'][:]
-            self.mask = co_enh < co_enhancement_threshold
-
-    def apply_mask(self, values, val_lon, val_lat, val_date, fill_val=np.nan):
-        if not np.allclose(self.lon, val_lon) or not np.allclose(self.lat, val_lat):
-            raise NotImplementedError('Grid lat/lon is inconsistent with mask lat/lon')
-
-        idate = np.flatnonzero(self.dates == val_date)[0]
-        mask_arr = self.mask[idate, :, :]
-        values[mask_arr] = fill_val
-
 
 
 def plot_gridded_data(
@@ -46,7 +29,7 @@ def plot_gridded_data(
     vscale: float = 1.0,
     cblabel: str = "",
     extent: Optional[Tuple[float, float, float, float]] = None,
-    plume_mask: Optional['PlumeMask'] = None,
+    plume_mask: Optional[PlumeMask] = None,
     feature_kws: dict = dict(),
     ax: Optional[plt.Axes] = None,
     **pcolormesh_kw
@@ -128,43 +111,19 @@ def plot_gridded_enhancement(
     ax: Optional[plt.Axes] = None,
     **pcolormesh_kw
 ):
-    with Dataset(grid_file) as ds:
-        if ds[variable].dimensions[0] == 'date':
-            file_dates = ds['date'][:]
-            if not isinstance(date, str):
-                date = date.strftime('%Y-%m-%d')
-            idate = np.flatnonzero(file_dates == date).item()
-            values = ds[variable][idate]
-        else:
-            values = ds[variable]
-        units = getattr(ds[variable], 'units', '??')
 
-        lon = ds['grid_lon'][:]
-        lat = ds['grid_lat'][:]
-
-    if plume_mask is not None:
-        date_obj = pd.to_datetime(date)
-        plume_mask.apply_mask(values, lon, lat, date_obj)
-
-    if extent:
-        lon_inds = (lon >= extent[0]) & (lon <= extent[1])
-        lat_inds = (lat >= extent[2]) & (lat <= extent[3])
-        lon = lon[lon_inds]
-        lat = lat[lat_inds]
-        # Use np.ix_ to correctly index the 2D array from 1D boolean masks
-        values = values[np.ix_(lat_inds, lon_inds)]
-
-    values = vscale * values
+    enh_dict = load_enhancements_for_date(grid_file=grid_file, date=date, variable=variable, plume_mask=plume_mask, extent=extent)
+    enh_dict['values'] = vscale * enh_dict['values']
 
     if ax is None:
         _, ax = plt.subplots(
             subplot_kw={"projection": ccrs.PlateCarree()}
         )
 
-    mesh = ax.pcolormesh(lon, lat, values, **pcolormesh_kw)
+    mesh = ax.pcolormesh(enh_dict['lon'], enh_dict['lat'], enh_dict['values'], **pcolormesh_kw)
 
-    final_cblabel = cblabel.format(var=variable, units=units)
-    extend = jplt.cbextend(values, vmin=pcolormesh_kw.get('vmin', None), vmax=pcolormesh_kw.get('vmax', None))
+    final_cblabel = cblabel.format(var=variable, units=enh_dict['units'])
+    extend = jplt.cbextend(enh_dict['values'], vmin=pcolormesh_kw.get('vmin', None), vmax=pcolormesh_kw.get('vmax', None))
     plt.colorbar(mesh, label=final_cblabel, extend=extend, ax=ax)
 
     add_features(ax, **feature_kws)
@@ -304,6 +263,37 @@ def er_vs_frp_box_plots(fire_df: pd.DataFrame, bin_edges: Union[int, float, np.n
     ax.set_ylabel('NO$_2$:CO enhancement ratio (mol mol$^{-1}$)')
 
 
+def fire_fit_plot(fire_df, frp_col: str, er_col: str = 'er', er_unc_col: str = 'er_unc', fit_x=None, point_kws=None, value_fit_plot_kws=None, ax=None):
+    ax = ax or plt.gca()
+    x = fire_df[frp_col].to_numpy()
+    y = fire_df[er_col].to_numpy()
+    yerr = fire_df[er_unc_col].to_numpy()
+
+    point_kws = dict() if point_kws is None else point_kws.copy()
+    point_kws.setdefault('color', 'royalblue')
+    point_kws.setdefault('ecolor', 'lightskyblue')
+    point_kws.setdefault('ls', 'none')
+    point_kws.setdefault('marker', '.')
+    point_kws.setdefault('zorder', 1.5)
+    point_kws.setdefault('alpha', 0.25)
+    ax.errorbar(x=x, y=y, yerr=yerr, **point_kws)
+
+    xlabel = frp_col.replace('_', ' ').capitalize().replace('frp', 'FRP')
+    ax.set_xlabel(f'{xlabel} (MW)')
+    ax.set_ylabel('NO$_2$:CO enhancement ratio (mol/mol)')
+
+    values_fit = jstats.PolyFitModel(x=x, y=y, yerr=yerr, model='sk', nans='drop')
+    value_fit_plot_kws = dict() if value_fit_plot_kws is None else value_fit_plot_kws
+    value_fit_plot_kws.setdefault('color', 'tab:red')
+    value_fit_plot_kws.setdefault('label', f'Fit: ${_to_sci_notation(values_fit.yint)} + {_to_sci_notation(values_fit.slope)}x$')
+    if fit_x is None:
+        x1, x2 = ax.get_xlim()
+        fit_x = np.linspace(x1, x2)
+    fit_y = values_fit.predict(fit_x)
+    ax.plot(fit_x, fit_y, **value_fit_plot_kws)
+    ax.grid(True)
+
+
 def _to_sci_notation(v, decimals=2, exp_cutoff=2) -> str:
     ex = int(np.floor(np.log10(np.abs(v))))
     if np.abs(ex) <= exp_cutoff:
@@ -349,19 +339,3 @@ def plot_frp_timeseries(
     ax.grid(True)
     ax.set_ylabel('Summed FRP (MW)')
     return h
-
-
-def subset_to_extent(lon, lat, values, extent):
-    xx = (lon >= extent[0]) & (lon <= extent[1])
-    yy = (lat >= extent[2]) & (lat <= extent[3])
-    # assumes that we read values from a file that put lat first
-    return values[np.ix_(yy, xx)]
-
-
-def subset_dict_to_extent(data: dict, extent):
-    xx = (data['lon'] >= extent[0]) & (data['lon'] <= extent[1])
-    yy = (data['lat'] >= extent[2]) & (data['lat'] <= extent[3])
-    data['lon'] = data['lon'][xx]
-    data['lat'] = data['lat'][yy]
-    data['values'] = data['values'][np.ix_(yy, xx)]
-    return data
