@@ -5,7 +5,6 @@ import numpy as np
 from pathlib import Path
 
 TROPESS_COL_INDS = {'total': 0, 'trop': 1, 'ut': 2, 'lt': 3, 'strat': 4}
-MOLEC_CM2_TO_MOL_M2 = 1e4 / 6.022e23
 
 def load_muses_cols(muses_root_dir: os.PathLike, species: str, date: datetime, step: int = 0) -> dict[str, np.ma.MaskedArray]:
     file = Path(muses_root_dir) / f'{date:%Y}' / f'{date:%m}' / f'{date:%d}' / 'L2_Products_Lite' / f'CRIS-JPSS-1_L2-{species}-{step}_{date:%Y_%m_%d}_F02_1.23_Litev01_Day_Night.nc'

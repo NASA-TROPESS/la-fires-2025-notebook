@@ -135,7 +135,7 @@ def plot_altadena_structure_perimeter(structure_dmg: gpd.GeoDataFrame, ax=None, 
     poly_kws.setdefault('add_points', False)
     poly_kws.setdefault('facecolor', 'gray')
     poly_kws.setdefault('edgecolor', 'black')
-    shapely.plotting.plot_polygon(poly, transform=ccrs.PlateCarree(), **poly_kws)
+    shapely.plotting.plot_polygon(poly, transform=ccrs.PlateCarree(), ax=ax, **poly_kws)
 
     poly_kws.pop('add_points')
     rect = Rectangle((0,0), 0, 0, label='Altadena structures', **poly_kws)
