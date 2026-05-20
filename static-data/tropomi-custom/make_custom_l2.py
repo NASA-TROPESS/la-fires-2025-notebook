@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser
 from datetime import datetime
+import jllutils.geography as jgeo
 from netCDF4 import Dataset, num2date
 import numpy as np
 from pathlib import Path
@@ -76,8 +77,8 @@ def main():
 
 def parse_args():
     p = ArgumentParser('Generate custom TROPOMI NO2 files for LA fires')
-    p.add_argument('start_date', default='2025-01-08', nargs='?', help='First date to process, default = %(default)s')
-    p.add_argument('end_date', default='2025-01-09', nargs='?', help='Last date to process, default = %(default)s')
+    p.add_argument('start_date', default='2025-01-01', nargs='?', help='First date to process, default = %(default)s')
+    p.add_argument('end_date', default='2025-01-11', nargs='?', help='Last date to process, default = %(default)s')
     p.add_argument('--remove-existing', action='store_true', help='Remove existing files for dates processed')
     p.add_argument('--pdb', action='store_true', help='Launch Python debugger')
     return p.parse_args()
@@ -179,16 +180,16 @@ class TropessLatLonPresInterp:
         return np.interp(x, x[is_good], this_z[is_good])
 
 
-    def __call__(self, out_lon, out_lat, out_pres, out_time):
-        # Just do all of the profiles. We're using a small domain for this study,
-        # so it's not that much extra computation. If it becomes an issue, we can
-        # pick the 10 closest profiles or something.
-        new_profiles = np.full([self.lon.size, out_pres.size], np.nan)
+    def __call__(self, out_lon, out_lat, out_pres, out_time, n_nodes=10):
+        # Limit to the closest profiles to try to speed up the computation
+        all_distances = jgeo.great_circle_distance(out_lon, out_lat, self.lon, self.lat)
+        ii_dist = np.argsort(all_distances)[:n_nodes]
+        new_profiles = np.full([n_nodes, out_pres.size], np.nan)
 
         # Ignore time - we should have cut down to the daytime values anyway
-        coords = np.stack([self.lon, self.lat], axis=1)
+        coords = np.stack([self.lon[ii_dist], self.lat[ii_dist]], axis=1)
 
-        for iprof in range(self.lon.size):
+        for inew, iprof in enumerate(ii_dist):
             if np.all(self.pres[iprof] < 0) or np.all(self.values[iprof] < 0):
                 continue
             p = self._fill_fills(self.pres[iprof])
@@ -201,7 +202,7 @@ class TropessLatLonPresInterp:
 
             # Use numpy interpolation because it does outside fill values as constant
             # value extrapolation
-            new_profiles[iprof] = np.interp(np.log(out_pres), np.log(p), x)
+            new_profiles[inew] = np.interp(np.log(out_pres), np.log(p), x)
 
         is_all_bad = np.all(np.isnan(new_profiles), axis=1)
         new_profiles = new_profiles[~is_all_bad]
@@ -382,6 +383,7 @@ def compute_fire_l2_no2(tropomi_l2_data: dict, profile_interp: LatLonPresInterp)
         fire_data['amf_total'][i] = amf_tot_fire
         fire_data['profile_shape'][i] = new_prof_shape 
         fire_data['no2_trop'][i] = tropomi_l2_data['no2_trop'][i] * tropomi_l2_data['amf_trop'][i] / amf_trop_fire
+    print('')
 
     for k, arr in fire_data.items():
         fire_data[k] = np.ma.masked_invalid(arr)
@@ -409,6 +411,10 @@ def write_custom_tropomi_l2_file(date: pd.Timestamp, l2_data: dict, template_fil
         ds.createGroup('PRODUCT')
 
         for key, arr in l2_data.items():
+            if key not in all_vars:
+                print(f'Warning: skipping output of variable "{key}" (no variable path defined)')
+                continue
+
             varpath = all_vars[key]
             try:
                 template_var = temp[varpath]
