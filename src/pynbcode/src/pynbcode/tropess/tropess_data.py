@@ -23,6 +23,44 @@ def load_muses_cols(muses_root_dir: os.PathLike, species: str, date: datetime, s
         }
 
 
+def load_tropess_cols(tropess_dir: os.PathLike, species: str, date: datetime) -> dict[str, np.ma.MaskedArray]:
+    pattern = f'TROPESS_*_{species}_{date:%Y%m%d}*.nc'
+    files = list(Path(tropess_dir).glob(pattern))
+    if len(files) != 1:
+        raise FileNotFoundError(f'Found {len(files)} matching "{pattern}" in {tropess_dir}: {files}')
+    file = files[0]
+    with Dataset(file) as ds:
+        out_data = {
+            'lat': ds['latitude'][:],
+            'lon': ds['longitude'][:],
+            'quality': np.ma.masked_all(ds.dimensions['target'].size),
+            'day': ds['geophysical/day_night_flag'][:],
+            # For this work, I only use total and tropospheric columns, so I'm not going to mess
+            # with the other three.
+            'columns': np.ma.masked_all([ds.dimensions['target'].size, 2]),
+            'air_columns': np.ma.masked_all([ds.dimensions['target'].size, 2]),
+        }
+
+        if 'x' in ds.variables.keys():
+            out_data['x'] = ds['x'][:]
+            out_data['p'] = ds['pressure'][:]
+
+        out_data['air_columns'][:,0] = ds['col_dry_air'][:]
+        if 'col' in ds.variables.keys():
+            out_data['columns'][:,0] = ds['col'][:]
+        if 'col_t' in ds.variables.keys():
+            out_data['columns'][:,1] = ds['col_t'][:]
+
+            # We don't seem to include partial columns of air, so we'd need to
+            # weight the total air column by the fraction of air in the subcolumn
+            trop_pres = ds['trop_pres'][:]
+            surf_pres = ds['surf_pres'][:]
+            trop_frac = (surf_pres - trop_pres) / surf_pres
+            out_data['air_columns'][:,1] = out_data['air_columns'][:,0] * trop_frac
+
+    return out_data
+
+
 def get_muses_col_values(data, column: str, col_avg: bool):
     icol = TROPESS_COL_INDS[column]
 

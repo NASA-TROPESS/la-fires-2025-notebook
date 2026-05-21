@@ -7,12 +7,13 @@ import numpy as np
 from pathlib import Path
 import pandas as pd
 from pynbcode.tropomi.priors import load_tropomi_no2_priors
-from pynbcode.tropess.tropess_data import load_muses_cols
+from pynbcode.tropess.tropess_data import load_muses_cols, load_tropess_cols
 from scipy.interpolate import LinearNDInterpolator
 
 STATIC_DATA_DIR = Path(__file__).parent.parent
 TROPOMI_PRIORS_DIR = STATIC_DATA_DIR / 'tropomi' / 'l2' / 'no2_prior'
 TROPESS_DATA_DIR = STATIC_DATA_DIR / 'tropess'
+TROPESS_STD_DATA_DIR = STATIC_DATA_DIR / 'tropess-daac' / 'standard'
 LA_CUSTOM_RET_EXTENT = [-120.0, -116.0, 32.0, 36.0]
 
 VARIABLES = {
@@ -168,8 +169,13 @@ class TropessLatLonPresInterp:
         self.values = values
 
     @classmethod
-    def for_date(cls, species, date, step=0, tropess_dir=TROPESS_DATA_DIR):
-        data = load_muses_cols(tropess_dir, species, date, step=step)
+    def for_date(cls, species, date, step=0, tropess_dir=None, standard_tropess: bool = True):
+        if standard_tropess:
+            data_dir = tropess_dir or TROPESS_STD_DATA_DIR
+            data = load_tropess_cols(data_dir, species, date)
+        else:
+            data_dir = tropess_dir or TROPESS_DATA_DIR
+            data = load_muses_cols(data_dir, species, date, step=step)
         # TROPESS uses hPa, convert to Pa
         return cls(lon=data['lon'], lat=data['lat'], pres=data['p'] * 1e2, values=data['x'])
 

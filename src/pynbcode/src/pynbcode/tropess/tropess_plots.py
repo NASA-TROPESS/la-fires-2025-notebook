@@ -3,13 +3,14 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import os
 
-from .tropess_data import load_muses_cols, make_filter_index, TROPESS_COL_INDS
+from .tropess_data import load_muses_cols, load_tropess_cols, make_filter_index, TROPESS_COL_INDS
 from ..plot_utils import add_features
 
-__all__ = ['plot_muses_columns']
+__all__ = ['plot_muses_or_tropess_columns']
 
-def plot_muses_columns(
-    muses_root: os.PathLike,
+def plot_muses_or_tropess_columns(
+    data_root: os.PathLike,
+    tropess_format: bool,
     species: str,
     date: datetime,
     extents: list[float],
@@ -26,7 +27,10 @@ def plot_muses_columns(
     cbkw: dict = dict(),
     **scatter_kws,
 ) -> None:
-    data = load_muses_cols(muses_root, species, date, step=step)
+    if tropess_format:
+        data = load_tropess_cols(data_root, species, date)
+    else:
+        data = load_muses_cols(data_root, species, date, step=step)
     ii = make_filter_index(data, extents=extents, good_only=good_only, day_only=day_only)
 
     icol = TROPESS_COL_INDS[column]
