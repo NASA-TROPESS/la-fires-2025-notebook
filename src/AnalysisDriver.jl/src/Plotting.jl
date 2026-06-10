@@ -9,8 +9,16 @@ using PythonPlot
 function plot_gridded_files(scenes, grid_dir, plot_dir)
     mkpath(plot_dir)
     matched_files = AnalysisDriver.utils.match_files(grid_dir)
+    scene = nothing  # needed to expand the scope of scene outside the try block
     for (datestr, files) in matched_files
-        scene = AnalysisDriver.utils.match_scene(files["no2"], scenes)
+        try
+            scene = AnalysisDriver.utils.match_scene(files["no2"], scenes)
+        catch e
+            @warn "$e, will not plot gridded files"
+            continue
+        end
+        # only make plots if found a scene - this way we can use configs
+        # that are a subset of the full
         save_as = joinpath(plot_dir, "$(scene["name"])_$datestr.png")
         if AnalysisDriver.utils.check_mtime(save_as, collect(values(files)))
             plot_scene(datestr, files["no2"], files["co"], scene, save_as=save_as)
