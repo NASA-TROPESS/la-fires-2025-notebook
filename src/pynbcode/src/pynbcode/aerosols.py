@@ -26,7 +26,10 @@ def load_aerosol_variable_for_date(
         plume_mask=None,
         extent=None,
     )
-    data['values'] = data['values'][wavelength_index]
+    if data['values'].ndim == 3:
+        data['values'] = data['values'][wavelength_index]
+    elif data['values'].ndim != 2:
+        raise NotImplementedError(f'Expected aerosol value array to be 2D or 3D, got {data["values"].ndim}D')
 
     # This must be done after we reduce the variable to 2D
     if plume_mask is not None:
