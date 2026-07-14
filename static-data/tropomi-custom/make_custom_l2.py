@@ -9,8 +9,11 @@ import pandas as pd
 from pynbcode.tropomi.priors import load_tropomi_no2_priors
 from pynbcode.tropess.tropess_data import load_muses_cols, load_tropess_cols
 from scipy.interpolate import LinearNDInterpolator
+import sys
+import tomllib
 
-STATIC_DATA_DIR = Path(__file__).parent.parent
+MY_DIR = Path(__file__).parent
+STATIC_DATA_DIR = MY_DIR.parent
 TROPOMI_PRIORS_DIR = STATIC_DATA_DIR / 'tropomi' / 'l2' / 'no2_prior'
 TROPESS_DATA_DIR = STATIC_DATA_DIR / 'tropess'
 TROPESS_STD_DATA_DIR = STATIC_DATA_DIR / 'tropess-daac' / 'standard'
@@ -48,7 +51,7 @@ NEW_VARIABLE_DIMENSIONS = {
 }
 
 VARIABLE_ATTRIBUTE_OVERRIDES = {
-    'profile_shape': dict(description='Modified profile shape, a pressure-weighted TROPESS CO profile interpolated to the TROPOMI pressure levels'),
+    'profile_shape': dict(description='Modified profile shape to estimate the impact of the fire on the retrieval'),
     'no2_trop': dict(note='Recalculated using the custom profile shape'),
     'amf_trop': dict(note='Recalculated using the custom profile shape'),
     'amf_total': dict(note='Recalculated using the custom profile shape; the total NO2 column however has NOT been recalculated'),
@@ -61,38 +64,103 @@ def main():
         import pdb
         pdb.set_trace()
 
+    if clargs.plume_method is None:
+        print('Must choose a plume method', file=sys.stderr)
+        sys.exit(2)
+
+    if clargs.out_dir is not None:
+        out_dir = Path(clargs.out_dir)
+    elif clargs.plume_method == 'tropess-co':
+        out_dir = STATIC_DATA_DIR / 'tropomi-custom' / 'tropess-co'
+    elif clargs.plume_method == 'gaussian':
+        out_subdir = f'{clargs.center_pres:.0f}hPa-by-{clargs.pres_width:.0f}hPa-{clargs.max_ppb:.0f}ppb'
+        out_dir = STATIC_DATA_DIR / 'tropomi-custom' / 'gaussian' / out_subdir
+    else:
+        raise NotImplementedError(f'unspecified --out-dir for plume method "{clargs.plume_method}"')
+
+    if clargs.cfg_for_extent is None:
+        retrieval_extent = LA_CUSTOM_RET_EXTENT
+    else:
+        retrieval_extent = _find_cfg_domain(clargs.cfg_for_extent)
+    print(f'Will do custom retrievals in domain {retrieval_extent}')
+
     dates = pd.date_range(clargs.start_date, clargs.end_date, freq='D')
     for date in dates:
         print(f'Processing {date:%Y-%m-%d}')
-        tropomi_l2_data, tropomi_l2_files = load_tropomi_l2_data(date, LA_CUSTOM_RET_EXTENT)
-        profile_interp = ComboLatLonPresInterp.for_date(date)
+        try:
+            tropomi_l2_data, tropomi_l2_files = load_tropomi_l2_data(date, retrieval_extent)
+        except FileNotFoundError as err:
+            print(f'{err}, skipping')
+            continue
+        if clargs.plume_method == 'tropess-co':
+            profile_interp = ComboLatLonPresInterp.for_date(date)
+        elif clargs.plume_method == 'gaussian':
+            profile_interp = TropomiPriorPlusGaussianLatLonPresInterp.for_date(
+                date=date,
+                plume_pmid=clargs.center_pres * 1e2,
+                plume_pwidth=clargs.pres_width * 1e2,
+                plume_max_dmf=clargs.max_ppb * 1e-9,
+            )
+        else:
+            raise NotImplementedError(f'plume method = {clargs.plume_method}')
+
         tropomi_fire_data = compute_fire_l2_no2(tropomi_l2_data, profile_interp)
         tropomi_l2_data.update(tropomi_fire_data)
         write_custom_tropomi_l2_file(
             date=date,
             l2_data=tropomi_l2_data,
+            prior_description=profile_interp.describe(),
             template_file=tropomi_l2_files[0],
+            out_dir=out_dir,
             remove_existing=clargs.remove_existing,
         )
 
 
 def parse_args():
-    p = ArgumentParser('Generate custom TROPOMI NO2 files for LA fires')
-    p.add_argument('start_date', default='2025-01-01', nargs='?', help='First date to process, default = %(default)s')
-    p.add_argument('end_date', default='2025-01-11', nargs='?', help='Last date to process, default = %(default)s')
+    p = ArgumentParser('Generate custom TROPOMI NO2 files estimating the impact of fire plumes in the AMF')
+    p.add_argument('start_date', help='First date to process.')
+    p.add_argument('end_date', help='Last date to process. Dates with no L2 files are skipped.')
+    p.add_argument('--cfg-for-extent', 
+                   help='TOML file defining fires. If given, the extent will cover all fires defined plus 1 deg. buffer.' 
+                        'If not given, then defaults to an extent around LA.')
+    p.add_argument('--out-dir', help='Directory to save the L2 files under. Inferred from the plume method if not specified.')
     p.add_argument('--remove-existing', action='store_true', help='Remove existing files for dates processed')
     p.add_argument('--pdb', action='store_true', help='Launch Python debugger')
+
+    subp = p.add_subparsers(title='plume method', description='How to determine what fire plume to add to the priors')
+    pco = subp.add_parser('tropess-co', help='Estimate the fire plume from TROPESS CO data')
+    pco.set_defaults(plume_method='tropess-co')
+
+    pgauss = subp.add_parser('gaussian', help='Insert a constant Gaussian fire plume in all profiles')
+    pgauss.add_argument('--center-pres', required=True, type=float, help='Center pressure of the plume in hPa')
+    pgauss.add_argument('--pres-width', required=True, type=float, help='1-sigma width of the plume in hPa')
+    pgauss.add_argument('--max-ppb', required=True, type=float, help='Maximum NO2 mole fraction of the plume in ppb')
+    pgauss.set_defaults(plume_method='gaussian')
+
     return p.parse_args()
 
 
 class LatLonPresInterp(ABC):
     @abstractmethod
     def __call__(self, out_lon: float, out_lat: float, out_pres: np.ndarray, out_time: pd.Timestamp):
+        """Return a VMR profile for the given coordinates, pressure levels, and time.
+
+        Pressure must be given in Pa.
+        """
+        pass
+
+    @abstractmethod
+    def describe(self) -> str:
+        """Return a string that describes how the profiles were modified
+        """
         pass
 
 
-class TropomiPriorLatLonPresInterp:
-    """Interpolate the gridded TROPOMI priors to new longitudes, latitudes, times, and pressure levels."""
+class TropomiPriorLatLonPresInterp(LatLonPresInterp):
+    """Interpolate the gridded TROPOMI priors to new longitudes, latitudes, times, and pressure levels.
+
+    Pressure must be given in Pa.
+    """
     def __init__(self, time: pd.DatetimeIndex, lon: np.ndarray, lat: np.ndarray, pres: np.ndarray, values: np.ndarray):
         assert np.all(np.diff(lon) > 0)
         assert np.all(np.diff(lat) > 0)
@@ -106,14 +174,18 @@ class TropomiPriorLatLonPresInterp:
 
     @classmethod
     def for_date(cls, date: datetime, priors_root=TROPOMI_PRIORS_DIR):
+        data = cls._data_for_date(date, priors_root=priors_root)
+        return cls(time=data['time'], lon=data['lon'], lat=data['lat'], pres=data['pres'], values=data['no2'])
+
+    @classmethod
+    def _data_for_date(cls, date: datetime, priors_root=TROPOMI_PRIORS_DIR):
         next_date = date + pd.Timedelta(days=1)
         pattern = f'S5P_OPER_AUX_CTMANA_{date:%Y%m%d}T000000_{next_date:%Y%m%d}T000000_*.nc'
         possible_files = list(Path(priors_root).glob(pattern))
         if len(possible_files) != 1:
             raise FileNotFoundError(f'No unique priors file found for {date}, list of files matching the glob was: {possible_files}')
 
-        data = load_tropomi_no2_priors(possible_files[0])
-        return cls(time=data['time'], lon=data['lon'], lat=data['lat'], pres=data['pres'], values=data['no2'])
+        return load_tropomi_no2_priors(possible_files[0])
 
     def __call__(self, out_lon: float, out_lat: float, out_pres: np.ndarray, out_time: pd.Timestamp):
         if out_lon < self.lon.min() or out_lat > self.lon.max():
@@ -159,8 +231,51 @@ class TropomiPriorLatLonPresInterp:
             final_profile[ilev] = interp(out_lon, out_lat, out_jtime)
         return final_profile
 
+    def describe(self) -> str:
+        return 'TROPOMI priors interpolated to new lat/lon/pressure'
 
-class TropessLatLonPresInterp:
+
+class TropomiPriorPlusGaussianLatLonPresInterp(TropomiPriorLatLonPresInterp):
+    """Interpolates the TROPOMI standard priors and adds a Gaussian plume to them.
+
+    The midpoint pressure and (1 sigma) width must be given in Pa. The maximum DMF of the plume
+    must be in mol/mol.
+    """
+    def __init__(self, time: pd.DatetimeIndex, lon: np.ndarray, lat: np.ndarray, pres: np.ndarray, values: np.ndarray, plume_pmid: float, plume_pwidth: float, plume_max_dmf: float):
+        super().__init__(time=time, lon=lon, lat=lat, pres=pres, values=values)
+        self.plume_pmid = plume_pmid
+        self.plume_pwidth = plume_pwidth
+        self.plume_max_dmf = plume_max_dmf
+
+    @classmethod
+    def for_date(cls, date: datetime, plume_pmid: float, plume_pwidth: float, plume_max_dmf: float, priors_root=TROPOMI_PRIORS_DIR):
+        data = cls._data_for_date(date, priors_root=priors_root)
+        return cls(
+            time=data['time'],
+            lon=data['lon'],
+            lat=data['lat'],
+            pres=data['pres'],
+            values=data['no2'],
+            plume_pmid=plume_pmid,
+            plume_pwidth=plume_pwidth,
+            plume_max_dmf=plume_max_dmf
+        )
+
+    def __call__(self, out_lon: float, out_lat: float, out_pres: np.ndarray, out_time: pd.Timestamp):
+        profile = super().__call__(out_lon=out_lon, out_lat=out_lat, out_pres=out_pres, out_time=out_time)
+        profile += self.gaussian_plume(pmid=self.plume_pmid, pwidth=self.plume_pwidth, max_dmf=self.plume_max_dmf, pres_levels=out_pres)
+        return profile
+
+    @staticmethod
+    def gaussian_plume(pmid, pwidth, max_dmf, pres_levels):
+        exp_part = np.exp(-0.5 * (pres_levels - pmid)**2 / pwidth**2 )
+        return max_dmf * exp_part
+
+    def describe(self) -> str:
+        return f'TROPOMI prior plus a {self.plume_pwidth*1e-2:.0f} hPa wide plume centered on {self.plume_pmid*1e-2:.0f} hPa with a max value of {self.plume_max_dmf*1e9:.0f} ppb'
+
+
+class TropessLatLonPresInterp(LatLonPresInterp):
     """Interpolate TROPESS posterior VMR profiles to new latitude, longitude, and pressure levels."""
     def __init__(self, lon, lat, pres, values):
         self.lon = lon
@@ -219,6 +334,9 @@ class TropessLatLonPresInterp:
             final_profile[ilev] = interp(out_lon, out_lat)
         return final_profile
 
+    def describe(self) -> str:
+        return 'TROPESS posterior CO interpreted as NO2 shape'
+
 
 class ComboLatLonPresInterp:
     """Interpolate a mixture of the TROPESS CO posteriors and TROPOMI NO2 priors to new coordinates."""
@@ -245,6 +363,9 @@ class ComboLatLonPresInterp:
 
         return 0.5 * (tropess_profile + tropomi_profile)
 
+    def describe(self) -> str:
+        return 'TROPOMI standard prior (reinterpolated) with TROPESS CO posterior added into the shape'
+
 
 
 def load_tropess_profiles(species, date, step=0):
@@ -263,6 +384,8 @@ def load_tropess_profiles(species, date, step=0):
 
 def load_tropomi_l2_data(date, extents):
     files = sorted((STATIC_DATA_DIR / 'tropomi' / 'l2' / 'no2').glob(f'*NO2____{date:%Y%m%d}T*.nc'))
+    if len(files) == 0:
+        raise FileNotFoundError('No NO2 L2 files found for date {date:%Y-%m-%d}')
 
     data = {k: [] for k in VARIABLES}
     fixed_data = {k: None for k in FIXED_VARIABLES}
@@ -311,7 +434,9 @@ def load_tropomi_l2_data(date, extents):
         data['tm5_b'],
     )
 
-    time_strings = [num2date(dt, delta_time_units).isoformat() for dt in data['delta_time']]
+    # Included timespec='microseconds' to ensure consistent formatting; the default will
+    # omit the sub-second component if not needed, which breaks to_datetime.
+    time_strings = [num2date(dt, delta_time_units).isoformat(timespec='microseconds') for dt in data['delta_time']]
     data['time'] = pd.to_datetime(time_strings)
 
     return data, files
@@ -373,7 +498,8 @@ def compute_fire_l2_no2(tropomi_l2_data: dict, profile_interp: LatLonPresInterp)
 
     n = tropomi_l2_data['lat'].size
     for i in range(n):
-        print(f'\rProcessing {i+1}/{n}', end='')
+        if i % 250 == 0:
+            print(f'Processing {i+1}/{n}')
         amf_trop_fire, amf_tot_fire, new_prof_shape = compute_fire_amf(
             lon=tropomi_l2_data['lon'][i],
             lat=tropomi_l2_data['lat'][i],
@@ -396,12 +522,19 @@ def compute_fire_l2_no2(tropomi_l2_data: dict, profile_interp: LatLonPresInterp)
     return fire_data
 
 
-def write_custom_tropomi_l2_file(date: pd.Timestamp, l2_data: dict, template_file: Path, remove_existing: bool = False):
+def write_custom_tropomi_l2_file(
+        date: pd.Timestamp,
+        l2_data: dict,
+        prior_description: str,
+        template_file: Path,
+        out_dir: Path,
+        remove_existing: bool = False
+):
     all_vars = VARIABLES.copy()
     all_vars.update(FIXED_VARIABLES)
     all_vars.update(NEW_VARIABLES)
 
-    dest_dir = STATIC_DATA_DIR / 'tropomi-custom' / 'l2' / 'no2'
+    dest_dir = out_dir / 'l2' / 'no2'
     if remove_existing:
         glob_existing = f'S5P_CUST_L2__NO2____{date:%Y%m%d}T000000_{date:%Y%m%d}T000000_XXXXX_YY_ZZZZZZ_*.nc'
         for extant in dest_dir.glob(glob_existing):
@@ -412,8 +545,10 @@ def write_custom_tropomi_l2_file(date: pd.Timestamp, l2_data: dict, template_fil
     filename = f'S5P_CUST_L2__NO2____{date:%Y%m%d}T000000_{date:%Y%m%d}T000000_XXXXX_YY_ZZZZZZ_{now:%Y%m%dT%H%M%S}.nc'
     if not dest_dir.exists():
         dest_dir.mkdir(parents=True)
+        print(f'Created output directory {dest_dir}')
     file = dest_dir / filename
     with Dataset(file, 'w') as ds, Dataset(template_file) as temp:
+        ds.prior_modification_scheme = prior_description
         ds.createGroup('PRODUCT')
 
         for key, arr in l2_data.items():
@@ -467,6 +602,26 @@ def _expand_custom_data(arr: np.ndarray, dims: list[str]) -> np.ndarray:
         else:
             arr = np.expand_dims(arr, axis=i)
     return arr
+
+
+def _find_cfg_domain(cfg_file, buffer=1.0):
+    with open(cfg_file, 'rb') as f:
+        cfg = tomllib.load(f)
+    x1, x2, y1, y2 = None, None, None, None
+    first = True
+    for scene in cfg['scene']:
+        for subscene in scene['subscene']:
+            ex = subscene['extent']
+            if first:
+                x1, x2, y1, y2 = ex
+                first = False
+            else:
+                x1 = min(x1, ex[0])
+                x2 = max(x2, ex[1])
+                y1 = min(y1, ex[2])
+                y2 = max(y2, ex[3])
+
+    return [x1 - buffer, x2 + buffer, y1 - buffer, y2 + buffer]
 
 
 if __name__ == '__main__':
