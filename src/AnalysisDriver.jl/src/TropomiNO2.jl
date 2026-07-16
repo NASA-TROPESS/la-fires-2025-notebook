@@ -6,12 +6,24 @@ using Interpolations
 using NCDatasets
 using OversampledGridding
 
-function tropomi_no2_config(prior_file)
+function tropomi_no2_config(prior_file; with_ak=true)
     init_fxn = nothing
     data_fxn = nothing
     if !isnothing(prior_file)
         init_fxn = () -> no2_prior_data_init_fxn(prior_file)
         data_fxn = (data) -> sample_no2_prior_data(data, prior_file)
+    end
+
+    vars_to_grid = Dict{String, Any}(
+        "no2_trop" => "PRODUCT/nitrogendioxide_tropospheric_column",
+        "no2_trop_err" => "PRODUCT/nitrogendioxide_tropospheric_column_precision",
+        "surface_pressure" => "PRODUCT/SUPPORT_DATA/INPUT_DATA/surface_pressure",
+        "no2_amf_trop" => "PRODUCT/air_mass_factor_troposphere",
+        "no2_amf_tot" => "PRODUCT/air_mass_factor_total"
+    )
+    if with_ak
+        vars_to_grid["layer_pressure"] = get_tropomi_layer_pressures
+        vars_to_grid["no2_ak"] = "PRODUCT/averaging_kernel"
     end
 
     return GridConfig(
@@ -20,15 +32,7 @@ function tropomi_no2_config(prior_file)
         loncorn_var="PRODUCT/SUPPORT_DATA/GEOLOCATIONS/longitude_bounds",
         latcorn_var="PRODUCT/SUPPORT_DATA/GEOLOCATIONS/latitude_bounds",
         keep_if_gt=Dict("PRODUCT/qa_value" => 0.5),
-        vars_to_grid=Dict(
-            "no2_trop" => "PRODUCT/nitrogendioxide_tropospheric_column",
-            "no2_trop_err" => "PRODUCT/nitrogendioxide_tropospheric_column_precision",
-            "surface_pressure" => "PRODUCT/SUPPORT_DATA/INPUT_DATA/surface_pressure",
-            "layer_pressure" => get_tropomi_layer_pressures,
-            "no2_ak" => "PRODUCT/averaging_kernel",
-            "no2_amf_trop" => "PRODUCT/air_mass_factor_troposphere",
-            "no2_amf_tot" => "PRODUCT/air_mass_factor_total"
-        ),
+        vars_to_grid=vars_to_grid,
         extra_vars=Dict(
             "time" => get_tropomi_time,
             "lon" => "PRODUCT/longitude",

@@ -1,0 +1,9 @@
+./make_custom_l3.jl --cfg ../download-config-anderson-local.toml --data-dir ./gaussian/560hPa-by-50hPa-25ppb/
+./make_custom_l3.jl --cfg ../download-config-anderson-local.toml --data-dir ./gaussian/560hPa-by-50hPa-100ppb/
+./make_custom_l3.jl --cfg ../download-config-anderson-local.toml --data-dir ./gaussian/560hPa-by-50hPa-150ppb/
+./make_custom_l3.jl --cfg ../download-config-anderson-local.toml --data-dir ./gaussian/800hPa-by-50hPa-25ppb/
+./make_custom_l3.jl --cfg ../download-config-anderson-local.toml --data-dir ./gaussian/800hPa-by-50hPa-100ppb/
+./make_custom_l3.jl --cfg ../download-config-anderson-local.toml --data-dir ./gaussian/800hPa-by-50hPa-150ppb
+./make_custom_l3.jl --cfg ../download-config-anderson-local.toml --data-dir ./gaussian/900hPa-by-50hPa-25ppb/
+./make_custom_l3.jl --cfg ../download-config-anderson-local.toml --data-dir ./gaussian/900hPa-by-50hPa-100ppb/
+./make_custom_l3.jl --cfg ../download-config-anderson-local.toml --data-dir ./gaussian/900hPa-by-50hPa-150ppb/
