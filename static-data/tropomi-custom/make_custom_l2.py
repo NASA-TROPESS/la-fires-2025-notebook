@@ -11,6 +11,7 @@ from pynbcode.tropess.tropess_data import load_muses_cols, load_tropess_cols
 from scipy.interpolate import LinearNDInterpolator
 import sys
 import tomllib
+import warnings
 
 MY_DIR = Path(__file__).parent
 STATIC_DATA_DIR = MY_DIR.parent
@@ -70,8 +71,10 @@ def main():
 
     if clargs.out_dir is not None:
         out_dir = Path(clargs.out_dir)
-    elif clargs.plume_method == 'tropess-co':
-        out_dir = STATIC_DATA_DIR / 'tropomi-custom' / 'tropess-co'
+    elif clargs.plume_method == 'tropess-co-avg':
+        out_dir = STATIC_DATA_DIR / 'tropomi-custom' / 'tropess-co-avg'
+    elif clargs.plume_method == 'tropess-dco-ratio':
+        out_dir = STATIC_DATA_DIR / 'tropomi-custom' / 'tropess-dco-ratio' / f'ratio-{clargs.no2_to_co:0.5f}'
     elif clargs.plume_method == 'gaussian':
         out_subdir = f'{clargs.center_pres:.0f}hPa-by-{clargs.pres_width:.0f}hPa-{clargs.max_ppb:.0f}ppb'
         out_dir = STATIC_DATA_DIR / 'tropomi-custom' / 'gaussian' / out_subdir
@@ -92,8 +95,15 @@ def main():
         except FileNotFoundError as err:
             print(f'{err}, skipping')
             continue
-        if clargs.plume_method == 'tropess-co':
+        if clargs.plume_method == 'tropess-co-avg':
             profile_interp = ComboLatLonPresInterp.for_date(date)
+        elif clargs.plume_method == 'tropess-dco-ratio':
+            profile_interp = COEnhtoNO2LatLonPresInterp.for_date(
+                no2_to_x_ratio=clargs.no2_to_co,
+                fire_date=date,
+                bckgnd_start=clargs.bckgnd_start,
+                bckgnd_end=clargs.bckgnd_end,
+            )
         elif clargs.plume_method == 'gaussian':
             profile_interp = TropomiPriorPlusGaussianLatLonPresInterp.for_date(
                 date=date,
@@ -128,8 +138,14 @@ def parse_args():
     p.add_argument('--pdb', action='store_true', help='Launch Python debugger')
 
     subp = p.add_subparsers(title='plume method', description='How to determine what fire plume to add to the priors')
-    pco = subp.add_parser('tropess-co', help='Estimate the fire plume from TROPESS CO data')
-    pco.set_defaults(plume_method='tropess-co')
+    pco = subp.add_parser('tropess-co-avg', help='Estimate the fire plume from an average TROPESS CO data and TROPOMI NO2 prior shape factors')
+    pco.set_defaults(plume_method='tropess-co-avg')
+
+    pco_enh = subp.add_parser('tropess-dco-ratio', help='Estimate the fire plume by adding the TROPESS CO enhancement times a NO2:CO ratio to the TROPOMI priors')
+    pco_enh.add_argument('--no2-to-co', required=True, type=float, help='The NO2 to CO ratio in the plume, in mol/mol. From the SCAB ground data, I estimate this to be 0.02 or 0.01.')
+    pco_enh.add_argument('--bckgnd-start', required=True, help='The first date to include in the background, in a format Pandas understands. This should be the first date of the fire in the configuration.')
+    pco_enh.add_argument('--bckgnd-end', required=True, help='The last date to include in the background, in a format Pandas understands. This should be the last date before the fire start in the configuration.')
+    pco_enh.set_defaults(plume_method='tropess-dco-ratio')
 
     pgauss = subp.add_parser('gaussian', help='Insert a constant Gaussian fire plume in all profiles')
     pgauss.add_argument('--center-pres', required=True, type=float, help='Center pressure of the plume in hPa')
@@ -143,7 +159,7 @@ def parse_args():
 class LatLonPresInterp(ABC):
     @abstractmethod
     def __call__(self, out_lon: float, out_lat: float, out_pres: np.ndarray, out_time: pd.Timestamp):
-        """Return a VMR profile for the given coordinates, pressure levels, and time.
+        """Return a VMR profile in mol/mol for the given coordinates, pressure levels, and time.
 
         Pressure must be given in Pa.
         """
@@ -341,6 +357,7 @@ class TropessLatLonPresInterp(LatLonPresInterp):
 class ComboLatLonPresInterp:
     """Interpolate a mixture of the TROPESS CO posteriors and TROPOMI NO2 priors to new coordinates."""
     def __init__(self, tropess_interp: TropessLatLonPresInterp, tropomi_interp: TropomiPriorLatLonPresInterp):
+        warnings.warn('The ComboLatLonPresInterp class needs updated to do a proper partial column calculation when weighting together the profiles.')
         self.tropess_interp = tropess_interp
         self.tropomi_interp = tropomi_interp
 
@@ -365,6 +382,75 @@ class ComboLatLonPresInterp:
 
     def describe(self) -> str:
         return 'TROPOMI standard prior (reinterpolated) with TROPESS CO posterior added into the shape'
+
+
+class TropessXEnhtoNO2LatLonPresInterp(LatLonPresInterp):
+    """Compute an NO2 enhancement using TROPESS CO posteriors minus a background and an NO2:X ratio.
+    """
+    def __init__(self, bckgnd_interp: list[TropessLatLonPresInterp], bckgnd_start, bckgnd_end, fire_interp: TropessLatLonPresInterp, no2_to_x_ratio: float):
+        self.bckgnd_interp = bckgnd_interp
+        self.bckgnd_start = pd.to_datetime(bckgnd_start)
+        self.bckgnd_end = pd.to_datetime(bckgnd_end)
+        self.fire_interp = fire_interp
+        self.no2_to_x_ratio = no2_to_x_ratio
+
+    @classmethod
+    def for_date(cls, no2_to_x_ratio, species, fire_date, bckgnd_start, bckgnd_end, step=0, tropess_dir=None, standard_tropess: bool = True):
+        bckgnd_interp = []
+        for date in pd.date_range(bckgnd_start, bckgnd_end):
+            this_i = TropessLatLonPresInterp.for_date(species=species, date=date, step=step, tropess_dir=tropess_dir, standard_tropess=standard_tropess)
+            bckgnd_interp.append(this_i)
+        fire_interp = TropessLatLonPresInterp.for_date(species=species, date=fire_date, step=step, tropess_dir=tropess_dir, standard_tropess=standard_tropess)
+        return cls(bckgnd_interp=bckgnd_interp, bckgnd_start=bckgnd_start, bckgnd_end=bckgnd_end, fire_interp=fire_interp, no2_to_x_ratio=no2_to_x_ratio)
+
+    def __call__(self, out_lon, out_lat, out_pres, out_time, n_nodes=10):
+        if self.bckgnd_start < out_time < self.bckgnd_end:
+            return np.zeros(out_pres.shape)
+        bckgnd_prof = self.get_background(out_lon=out_lon, out_lat=out_lat, out_pres=out_pres, out_time=out_time, n_nodes=n_nodes)
+        fire_prof = self.fire_interp(out_lon=out_lon, out_lat=out_lat, out_pres=out_pres, out_time=out_time, n_nodes=n_nodes)
+        profile = fire_prof - bckgnd_prof
+        profile[profile < 0] = 0
+        return profile * self.no2_to_x_ratio
+
+    def get_background(self, out_lon, out_lat, out_pres, out_time, n_nodes=10):
+        bckgnd = np.zeros(out_pres.shape)
+        wt = np.zeros(out_pres.shape)
+        for bi in self.bckgnd_interp:
+            prof = bi(out_lon=out_lon, out_lat=out_lat, out_pres=out_pres, out_time=out_time, n_nodes=n_nodes)
+            ii_good = np.isfinite(prof)
+            bckgnd[ii_good] += prof[ii_good]
+            wt[ii_good] += 1.0
+        return bckgnd / wt
+
+    def describe(self) -> str:
+        return 'TROPESS CO posterior minus pre-fire background times an NO2:CO ratio'
+
+
+class COEnhtoNO2LatLonPresInterp:
+    """Compute priors as the sum of TROPESS CO posteriors enhancements times an NO2:CO ratio and TROPOMI NO2 priors."""
+    def __init__(self, tropess_interp: TropessLatLonPresInterp, tropomi_interp: TropomiPriorLatLonPresInterp):
+        self.tropess_interp = tropess_interp
+        self.tropomi_interp = tropomi_interp
+
+    @classmethod
+    def for_date(cls, no2_to_x_ratio, fire_date, bckgnd_start, bckgnd_end):
+        tropess = TropessXEnhtoNO2LatLonPresInterp.for_date(no2_to_x_ratio, 'CO', fire_date, bckgnd_start, bckgnd_end)
+        tropomi = TropomiPriorLatLonPresInterp.for_date(fire_date)
+        return cls(tropess_interp=tropess, tropomi_interp=tropomi)
+
+    def __call__(self, out_lon, out_lat, out_pres, out_time):
+        tropess_profile = self.tropess_interp(
+            out_lon=out_lon, out_lat=out_lat, out_pres=out_pres, out_time=out_time
+        )
+
+        tropomi_profile = self.tropomi_interp(
+            out_lon=out_lon, out_lat=out_lat, out_pres=out_pres, out_time=out_time
+        )
+
+        return tropess_profile + tropomi_profile
+
+    def describe(self) -> str:
+        return 'TROPOMI standard prior (reinterpolated) with TROPESS CO posterior enhancement added into the shape assuming a fixed CO:NO2 ratio'
 
 
 
