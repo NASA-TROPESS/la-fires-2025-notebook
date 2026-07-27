@@ -543,7 +543,7 @@ def match_frps_to_ers_many_files(frp: FrpMultiSceneProvider, er: ErMultiScenePro
     dfs = []
     nscene = len(scenes)
     for iscene, scene in enumerate(scenes, start=1):
-        print(f'Matching for scene {iscene} of {nscene}: {scene["name"]}')
+        logger.debug(f'Matching for scene {iscene} of {nscene}: {scene["name"]}')
         for subscene in scene['subscene']:
             subscene_df = match_frps_to_ers(frp, er, scene_name=scene['name'], subscene=subscene, local_hour_limits=local_hour_limits, tz=tz)
             # Since we have VIIRS for 2020 and 2021 fire seasons without any differentiation by scene, we want to be sure that
