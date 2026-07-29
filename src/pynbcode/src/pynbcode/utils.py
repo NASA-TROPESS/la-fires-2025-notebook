@@ -95,3 +95,17 @@ def bbox_from_width_and_angle(base_lat, base_lon, angle, width, depth, as_poly=F
 
 def default_upwind_box(as_poly=False):
     return bbox_from_width_and_angle(base_lat=34.3, base_lon=-117.9, angle=30.0, width=0.5, depth=0.75, as_poly=as_poly)
+
+
+def iter_subscene_dates(scenes: list, from_fire_start: bool, verbose: bool = False):
+    nscene = len(scenes)
+    for iscene, scene in enumerate(scenes, start=1):
+        nsub = len(scene['subscene'])
+        for isub, subscene in enumerate(scene['subscene'], start=1):
+            start = subscene['fire_start'] if from_fire_start else scene['start']
+            dates = pd.date_range(start, scene['end'])
+            ndate = len(dates)
+            for idate, date in enumerate(dates, start=1):
+                if verbose:
+                    print(f'Now on date {date:%Y-%m-%d} ({idate}/{ndate}) from subscene {subscene["name"]} ({isub}/{nsub}) from scene {scene["name"]} ({iscene}/{nscene})')
+                yield scene['name'], subscene['name'], date, subscene['extent']
