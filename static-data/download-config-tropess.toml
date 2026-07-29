@@ -16,7 +16,7 @@ filters = { short_name = "TRPSYL2ALLCRS1MGLOS", version = "2" }
 [[scene]]
 name = 'eaton_and_palisades'
 start = "2025-01-01"
-end = "2025-01-11"
+end = "2025-01-10"
 lat = 35.0
 lon = -119.5
 lonwidth = 11.0

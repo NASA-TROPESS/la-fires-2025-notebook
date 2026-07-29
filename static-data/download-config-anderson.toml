@@ -20,6 +20,13 @@ filters = { short_name = "S5P_L2__NO2____HiR", version = "2" }
 provider = "earthaccess"
 filters = { short_name = "S5P_L2__CO_____HiR", version = "2" }
 
+[products.alh]
+provider = "earthaccess"
+filters = { short_name = "S5P_L2__AER_LH_HiR", version = "2" }
+
+[products.aer]
+provider = "earthaccess"
+filters = { short_name = "TROPOMAER", version = "1" }
 
 [products.no2_prior]
 provider = "tropomi-priors-eodata"
