@@ -41,14 +41,18 @@ def add_features(
             category="cultural",
             name="admin_2_counties"
         )
-        # Create a feature from the shapefile geometries
-        counties_feature = cfeat.ShapelyFeature(
-            shapereader.Reader(counties_shp).geometries(),
-            ccrs.PlateCarree(),
-            facecolor='none',
-            edgecolor='gray'
-        )
-        ax.add_feature(counties_feature)
+        rdr = shapereader.Reader(counties_shp)
+        try:
+            # Create a feature from the shapefile geometries
+            counties_feature = cfeat.ShapelyFeature(
+                rdr.geometries(),
+                ccrs.PlateCarree(),
+                facecolor='none',
+                edgecolor='gray'
+            )
+            ax.add_feature(counties_feature)
+        finally:
+            rdr.close()
 
     if gridlines:
         gl = ax.gridlines(draw_labels=True, linestyle='--', alpha=0.5)
