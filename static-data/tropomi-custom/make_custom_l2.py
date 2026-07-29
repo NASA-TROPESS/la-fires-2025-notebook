@@ -43,11 +43,13 @@ FIXED_VARIABLES = {
 
 NEW_VARIABLES = {
     'profile_shape': 'PRODUCT/SUPPORT_DATA/INPUT_DATA/profile_shape',
+    'scattering_weights': 'PRODUCT/SUPPORT_DATA/INPUT_DATA/scattering_weights',
     'pres_edges': 'PRODUCT/pressure_edges',
 }
 
 NEW_VARIABLE_DIMENSIONS = {
     'profile_shape': ('time', 'scanline', 'ground_pixel', 'layer'),
+    'scattering_weights': ('time', 'scanline', 'ground_pixel', 'layer'),
     'pres_edges': ('time', 'scanline', 'ground_pixel', 'layer', 'vertices')
 }
 
@@ -78,6 +80,9 @@ def main():
     elif clargs.plume_method == 'gaussian':
         out_subdir = f'{clargs.center_pres:.0f}hPa-by-{clargs.pres_width:.0f}hPa-{clargs.max_ppb:.0f}ppb'
         out_dir = STATIC_DATA_DIR / 'tropomi-custom' / 'gaussian' / out_subdir
+    elif clargs.plume_method == 'gaussian+aerosol':
+        out_subdir = f'{clargs.center_pres:.0f}hPa-by-{clargs.pres_width:.0f}hPa-{clargs.max_ppb:.0f}ppb-{clargs.sw:.2f}sw'
+        out_dir = STATIC_DATA_DIR / 'tropomi-custom' / 'gaussian-aerosol' / out_subdir
     else:
         raise NotImplementedError(f'unspecified --out-dir for plume method "{clargs.plume_method}"')
 
@@ -110,6 +115,14 @@ def main():
                 plume_pmid=clargs.center_pres * 1e2,
                 plume_pwidth=clargs.pres_width * 1e2,
                 plume_max_dmf=clargs.max_ppb * 1e-9,
+            )
+        elif clargs.plume_method == 'gaussian+aerosol':
+            profile_interp = GaussianLatLonPresInterpReducedSensitivity.for_date(
+                date=date,
+                plume_pmid=clargs.center_pres * 1e2,
+                plume_pwidth=clargs.pres_width * 1e2,
+                plume_max_dmf=clargs.max_ppb * 1e-9,
+                sw=clargs.sw
             )
         else:
             raise NotImplementedError(f'plume method = {clargs.plume_method}')
@@ -153,6 +166,13 @@ def parse_args():
     pgauss.add_argument('--max-ppb', required=True, type=float, help='Maximum NO2 mole fraction of the plume in ppb')
     pgauss.set_defaults(plume_method='gaussian')
 
+    pgauss_aer = subp.add_parser('gaussian+aerosol', help='Insert a constant Gaussian fire plume in all profiles and assume no sensitivity below the plume')
+    pgauss_aer.add_argument('--center-pres', required=True, type=float, help='Center pressure of the plume in hPa')
+    pgauss_aer.add_argument('--pres-width', required=True, type=float, help='1-sigma width of the plume in hPa')
+    pgauss_aer.add_argument('--max-ppb', required=True, type=float, help='Maximum NO2 mole fraction of the plume in ppb')
+    pgauss_aer.add_argument('--sw', required=True, type=float, help='Scattering weight maximum below the plume')
+    pgauss_aer.set_defaults(plume_method='gaussian+aerosol')
+
     return p.parse_args()
 
 
@@ -164,6 +184,9 @@ class LatLonPresInterp(ABC):
         Pressure must be given in Pa.
         """
         pass
+
+    def update_scattering_weights(self, pres_centers: np.ndarray, sw: np.ndarray) -> np.ndarray:
+        return sw
 
     @abstractmethod
     def describe(self) -> str:
@@ -289,6 +312,41 @@ class TropomiPriorPlusGaussianLatLonPresInterp(TropomiPriorLatLonPresInterp):
 
     def describe(self) -> str:
         return f'TROPOMI prior plus a {self.plume_pwidth*1e-2:.0f} hPa wide plume centered on {self.plume_pmid*1e-2:.0f} hPa with a max value of {self.plume_max_dmf*1e9:.0f} ppb'
+
+
+class GaussianLatLonPresInterpReducedSensitivity(TropomiPriorPlusGaussianLatLonPresInterp):
+    def __init__(self, time: pd.DatetimeIndex, lon: np.ndarray, lat: np.ndarray, pres: np.ndarray, values: np.ndarray, plume_pmid: float, plume_pwidth: float, plume_max_dmf: float, sw: float):
+        super().__init__(time=time, lon=lon, lat=lat, pres=pres, values=values, plume_pmid=plume_pmid, plume_pwidth=plume_pwidth, plume_max_dmf=plume_max_dmf)
+        self.sw_value = sw
+
+    @classmethod
+    def for_date(cls, date: datetime, plume_pmid: float, plume_pwidth: float, plume_max_dmf: float, sw: float, priors_root=TROPOMI_PRIORS_DIR):
+        data = cls._data_for_date(date, priors_root=priors_root)
+        return cls(
+            time=data['time'],
+            lon=data['lon'],
+            lat=data['lat'],
+            pres=data['pres'],
+            values=data['no2'],
+            plume_pmid=plume_pmid,
+            plume_pwidth=plume_pwidth,
+            plume_max_dmf=plume_max_dmf,
+            sw=sw
+        )
+
+    def update_scattering_weights(self, pres_centers: np.ndarray, sw: np.ndarray) -> np.ndarray:
+        sw = sw.copy()
+        # Quick and dirty kludge that just assumes minimal sensitivity below the
+        # aerosol layer core. This way we only assume a decrease in sensitivity below
+        # the plume due to either absorbance or shielding, and don't assume that there
+        # is less sensitivity in the plume, which may not be true in scattering plumes.
+        # We keep the original if it is smaller so that cloud shielding is retained.
+        ii = pres_centers >= (self.plume_pmid + self.plume_pwidth)
+        sw[ii] = np.ma.minimum(self.sw_value, sw[ii])
+        return sw
+
+    def describe(self) -> str:
+        return f'TROPOMI prior plus a {self.plume_pwidth*1e-2:.0f} hPa wide plume centered on {self.plume_pmid*1e-2:.0f} hPa with a max value of {self.plume_max_dmf*1e9:.0f} ppb with scattering weights set to min({self.sw_value}, original) below the plume.'
 
 
 class TropessLatLonPresInterp(LatLonPresInterp):
@@ -561,7 +619,10 @@ def compute_fire_amf(
     profile_interp: LatLonPresInterp
 ):
     new_x = compute_pres_weighted_prof(lon=lon, lat=lat, pres_edges=tropomi_pres_edges, time=time, profile_interp=profile_interp)
-    tropomi_sw = tropomi_ak * tropomi_amf_tot
+    tropomi_sw_orig = tropomi_ak * tropomi_amf_tot
+    pres_centers = np.ma.mean(tropomi_pres_edges, axis=1)
+    tropomi_sw = profile_interp.update_scattering_weights(pres_centers, tropomi_sw_orig)
+
     fire_amf_tot = np.ma.sum(tropomi_sw * new_x) / np.ma.sum(new_x)
     # The ATBD says the the tropospheric AMF includes the tropopause level.
     # If we assume the index in the file is zero-based, that means that we
@@ -571,7 +632,7 @@ def compute_fire_amf(
     # See sect. 6.4 (pages 35-37)
     i_trop = tropomi_i_tropopause + 1
     fire_amf_trop = np.ma.sum(tropomi_sw[:i_trop] * new_x[:i_trop]) / np.ma.sum(new_x[:i_trop])
-    return fire_amf_trop.item(), fire_amf_tot.item(), new_x
+    return fire_amf_trop.item(), fire_amf_tot.item(), new_x, tropomi_sw
 
 
 def compute_fire_l2_no2(tropomi_l2_data: dict, profile_interp: LatLonPresInterp):
@@ -580,13 +641,14 @@ def compute_fire_l2_no2(tropomi_l2_data: dict, profile_interp: LatLonPresInterp)
         'amf_trop': np.ma.masked_all_like(tropomi_l2_data['amf_trop']),
         'amf_total': np.ma.masked_all_like(tropomi_l2_data['amf_trop']),
         'profile_shape': np.ma.masked_all_like(tropomi_l2_data['ak']),
+        'scattering_weights': np.ma.masked_all_like(tropomi_l2_data['ak']),
     }
 
     n = tropomi_l2_data['lat'].size
     for i in range(n):
         if i % 250 == 0:
             print(f'Processing {i+1}/{n}')
-        amf_trop_fire, amf_tot_fire, new_prof_shape = compute_fire_amf(
+        amf_trop_fire, amf_tot_fire, new_prof_shape, s_weights = compute_fire_amf(
             lon=tropomi_l2_data['lon'][i],
             lat=tropomi_l2_data['lat'][i],
             time=tropomi_l2_data['time'][i],
@@ -600,6 +662,7 @@ def compute_fire_l2_no2(tropomi_l2_data: dict, profile_interp: LatLonPresInterp)
         fire_data['amf_trop'][i] = amf_trop_fire
         fire_data['amf_total'][i] = amf_tot_fire
         fire_data['profile_shape'][i] = new_prof_shape 
+        fire_data['scattering_weights'][i] = s_weights
         fire_data['no2_trop'][i] = tropomi_l2_data['no2_trop'][i] * tropomi_l2_data['amf_trop'][i] / amf_trop_fire
     print('')
 
