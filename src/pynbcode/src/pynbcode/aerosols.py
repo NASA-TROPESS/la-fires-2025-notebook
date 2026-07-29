@@ -1,7 +1,7 @@
 import os
 import pandas as pd
-from pathlib import Path
 
+from .constants import STATIC_DATA_DIR
 from .gridded_data import load_variable_for_date
 from .utils import PlumeMask, subset_dict_to_extent
 
@@ -12,7 +12,7 @@ def load_aerosol_variable_for_date(
     scene: str,
     date: pd.Timestamp | str,
     variable: str,
-    data_dir: os.PathLike = Path('static-data/tropomi/gridded/'),
+    data_dir: os.PathLike = STATIC_DATA_DIR / 'tropomi' / 'gridded',
     plume_mask: PlumeMask | None = None,
     extent: Tuple[float, float, float, float] | None = None,
     wavelength_index: int = 2, # index = 2 is the 500 nm values

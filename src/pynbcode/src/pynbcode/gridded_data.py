@@ -3,6 +3,7 @@ import os
 import pandas as pd
 from pathlib import Path
 
+from .constants import STATIC_DATA_DIR
 from .utils import PlumeMask, subset_dict_to_extent
 
 from typing import Tuple
@@ -13,7 +14,7 @@ def load_variable_for_date(
     scene: str,
     date: pd.Timestamp | str,
     variable: str,
-    data_dir: os.PathLike = Path('static-data/tropomi/gridded/'),
+    data_dir: os.PathLike = STATIC_DATA_DIR / 'tropomi' / 'gridded',
     plume_mask: PlumeMask | None = None,
     extent: Tuple[float, float, float, float] | None = None,
 ) -> dict:

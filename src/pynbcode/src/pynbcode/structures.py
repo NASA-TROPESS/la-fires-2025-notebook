@@ -9,7 +9,7 @@ import pandas as pd
 from shapely import Polygon
 import shapely.plotting
 
-from .constants import ALTADENA_EXTENT
+from .constants import ALTADENA_EXTENT, STATIC_DATA_DIR
 
 
 from typing import Tuple
@@ -24,7 +24,7 @@ class DamageLevel(IntEnum):
     INACCESSIBLE = -1
 
 
-def load_structures_damage_df(structures_file='static-data/fire-progression/structures.geojson'):
+def load_structures_damage_df(structures_file=STATIC_DATA_DIR / 'fire-progression/structures.geojson'):
     label_map = {
         'No Damage': DamageLevel.NO_DAMAGE,
         'Affected (>0-10%)': DamageLevel.AFFECTED,
@@ -39,7 +39,7 @@ def load_structures_damage_df(structures_file='static-data/fire-progression/stru
     return df
 
 
-def get_last_fire_size(fire_name: str, perimeter_file='static-data/fire-progression/fire-perimeters.geojson'):
+def get_last_fire_size(fire_name: str, perimeter_file=STATIC_DATA_DIR / 'fire-progression/fire-perimeters.geojson'):
     df = gpd.read_file(perimeter_file)
     nn = df.name.str.lower() == fire_name.lower()
     df = df.loc[nn].sort_values('dateTime')
