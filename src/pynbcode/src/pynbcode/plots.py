@@ -108,12 +108,15 @@ def plot_gridded_enhancement(
     extent: Optional[Tuple[float, float, float, float]] = None,
     plume_mask: Optional['PlumeMask'] = None,
     feature_kws: dict = dict(),
+    show_mean_er: bool = True,
+    mean_er_text_kw: Optional[dict] = None, 
     ax: Optional[plt.Axes] = None,
     **pcolormesh_kw
 ):
 
     enh_dict = load_enhancements_for_date(grid_file=grid_file, date=date, variable=variable, plume_mask=plume_mask, extent=extent)
     enh_dict['values'] = vscale * enh_dict['values']
+    units = _units_mathmode(enh_dict['units'])
 
     if ax is None:
         _, ax = plt.subplots(
@@ -122,7 +125,19 @@ def plot_gridded_enhancement(
 
     mesh = ax.pcolormesh(enh_dict['lon'], enh_dict['lat'], enh_dict['values'], **pcolormesh_kw)
 
-    final_cblabel = cblabel.format(var=variable, units=enh_dict['units'])
+    if show_mean_er:
+        mean_er = np.nanmean(enh_dict['values'])
+        std_er = np.nanstd(enh_dict['values'], ddof=1)
+        mean_er_text_kw = mean_er_text_kw or dict()
+        mean_er_text_kw.setdefault('x', 0.98)
+        mean_er_text_kw.setdefault('y', 0.96)
+        mean_er_text_kw.setdefault('ha', 'right')
+        mean_er_text_kw.setdefault('va', 'top')
+        mean_er_text_kw.setdefault('transform', ax.transAxes)
+        mean_er_text_kw.setdefault('backgroundcolor', (1.0, 1.0, 1.0, 0.75))
+        ax.text(s=f'Mean ER: {mean_er:.1f} $\\pm$ {std_er:.1f} {units}', **mean_er_text_kw)
+
+    final_cblabel = cblabel.format(var=variable, units=units)
     extend = jplt.cbextend(enh_dict['values'], vmin=pcolormesh_kw.get('vmin', None), vmax=pcolormesh_kw.get('vmax', None))
     plt.colorbar(mesh, label=final_cblabel, extend=extend, ax=ax)
 
@@ -301,6 +316,10 @@ def _to_sci_notation(v, decimals=2, exp_cutoff=2) -> str:
     mantissa = np.round(v / 10**ex, decimals=decimals)
     # This is used in a format call, so the curly braces need escaped twice
     return f'({mantissa} \\times 10^{{{{{ex}}}}})'
+
+
+def _units_mathmode(units):
+    return re.sub(r'\^([+\-]?\d+)', r'$^{\1}$', units)
 
 
 def plot_frp_timeseries(

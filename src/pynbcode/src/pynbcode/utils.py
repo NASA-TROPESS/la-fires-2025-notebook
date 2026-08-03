@@ -1,8 +1,10 @@
-from .constants import STD_CO_ENH
+from .constants import STD_CO_ENH, STATIC_DATA_DIR
 from enum import IntEnum
 from netCDF4 import Dataset
 import numpy as np
 import pandas as pd
+from pathlib import Path
+import re
 from shapely.geometry import Point, Polygon
 
 from typing import Tuple
@@ -29,20 +31,67 @@ class ConfidenceLevel(IntEnum):
 
 
 class PlumeMask:
-    def __init__(self, enhancement_file: str, enhancement_group: str = 'Time', co_enhancement_threshold: float = STD_CO_ENH) -> None:
+    def __init__(self, dates, grid_lon, grid_lat, mask) -> None:
+        self.dates = dates
+        self.lon = grid_lon
+        self.lat = grid_lat
+        self.mask = mask
+
+    @classmethod
+    def from_enhancement(cls, enhancement_file: str, enhancement_group: str = 'Time', co_enhancement_threshold: float = STD_CO_ENH):
         with Dataset(enhancement_file) as ds:
-            self.dates = pd.to_datetime(ds['date'][:])
-            self.lon = ds['grid_lon'][:]
-            self.lat = ds['grid_lat'][:]
+            dates = pd.to_datetime(ds['date'][:])
+            lon = ds['grid_lon'][:]
+            lat = ds['grid_lat'][:]
             co_enh = ds[enhancement_group]['co_enhancement'][:]
-            self.mask = co_enh < co_enhancement_threshold
+            mask = co_enh < co_enhancement_threshold
+            return cls(dates=dates, grid_lon=lon, grid_lat=lat, mask=mask)
+
+    @classmethod
+    def from_floodfill(cls, scene_name: str, subscene_name: str, plume_dir: Path = STATIC_DATA_DIR / 'tropomi' / 'plume'):
+        plume_files = sorted(plume_dir.glob(f'plumeinfo_{scene_name}_{subscene_name}_????????.nc'))
+        dates = []
+        lon = None
+        lat = None
+        mask = []
+
+        for file in plume_files:
+            with Dataset(file) as ds:
+                this_date = pd.to_datetime(re.search(r'_(\d{8}).nc', file.name).group(1))
+                this_lon = ds['grid_lon'][:]
+                this_lat = ds['grid_lat'][:]
+                this_mask = ds['mask'][:].filled(0).astype(bool)
+
+            if lon is None:
+                lon = this_lon
+            elif not np.allclose(lon, this_lon):
+                raise ValueError('longitudes are inconsistent across files')
+
+            if lat is None:
+                lat = this_lat
+            elif not np.allclose(lat, this_lat):
+                raise ValueError('latitudes are inconsistent across files')
+
+            dates.append(this_date)
+            # The floodfill masks are 1 in the plume, we need 1 out of the plume
+            mask.append(~this_mask[np.newaxis])
+
+        dates = pd.DatetimeIndex(dates)
+        mask = np.concatenate(mask, axis=0)
+        return cls(dates=dates, grid_lon=lon, grid_lat=lat, mask=mask)
+
 
     def apply_mask(self, values, val_lon, val_lat, val_date, fill_val=np.nan):
-        if not np.allclose(self.lon, val_lon) or not np.allclose(self.lat, val_lat):
-            raise NotImplementedError('Grid lat/lon is inconsistent with mask lat/lon')
+        ix1 = np.flatnonzero(np.isclose(self.lon[0], val_lon)).item()
+        ix2 = ix1 + self.lon.size
+        iy1 = np.flatnonzero(np.isclose(self.lat[0], val_lat)).item()
+        iy2 = iy1 + self.lat.size
+        if not np.allclose(self.lon, val_lon[ix1:ix2]) or not np.allclose(self.lat, val_lat[iy1:iy2]):
+            raise NotImplementedError('Could not match mask lat/lon to a subset of the value lat/lon')
 
         idate = np.flatnonzero(self.dates == val_date)[0]
-        mask_arr = self.mask[idate, :, :]
+        mask_arr = np.ones(values.shape, dtype=bool)
+        mask_arr[iy1:iy2, ix1:ix2] = self.mask[idate, :, :]
         values[mask_arr] = fill_val
 
 
