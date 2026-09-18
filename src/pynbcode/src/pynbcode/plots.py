@@ -278,11 +278,18 @@ def er_vs_frp_box_plots(fire_df: pd.DataFrame, bin_edges: Union[int, float, np.n
     ax.set_ylabel('NO$_2$:CO enhancement ratio (mol mol$^{-1}$)')
 
 
-def fire_fit_plot(fire_df, frp_col: str, er_col: str = 'er', er_unc_col: str = 'er_unc', fit_x=None, point_kws=None, value_fit_plot_kws=None, ax=None):
+def fire_fit_plot(fire_df, frp_col: str, er_col: str = 'er', er_unc_col: str = 'er_unc', er_mmol_mol: bool = False,
+                  fit_x=None, point_kws=None, value_fit_plot_kws=None, ax=None):
     ax = ax or plt.gca()
     x = fire_df[frp_col].to_numpy()
     y = fire_df[er_col].to_numpy()
     yerr = fire_df[er_unc_col].to_numpy()
+    if er_mmol_mol:
+        y = y * 1000
+        yerr = yerr * 1000
+        units = 'mmol/mol'
+    else:
+        units = 'mol/mol'
 
     point_kws = dict() if point_kws is None else point_kws.copy()
     point_kws.setdefault('color', 'royalblue')
@@ -295,7 +302,7 @@ def fire_fit_plot(fire_df, frp_col: str, er_col: str = 'er', er_unc_col: str = '
 
     xlabel = frp_col.replace('_', ' ').capitalize().replace('frp', 'FRP')
     ax.set_xlabel(f'{xlabel} (MW)')
-    ax.set_ylabel('NO$_2$:CO enhancement ratio (mol/mol)')
+    ax.set_ylabel(f'NO$_2$:CO enhancement ratio ({units})')
 
     values_fit = jstats.PolyFitModel(x=x, y=y, yerr=yerr, model='sk', nans='drop')
     value_fit_plot_kws = dict() if value_fit_plot_kws is None else value_fit_plot_kws
