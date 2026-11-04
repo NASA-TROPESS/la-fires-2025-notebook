@@ -18,6 +18,7 @@ STATIC_DATA_DIR = MY_DIR.parent
 TROPOMI_PRIORS_DIR = STATIC_DATA_DIR / 'tropomi' / 'l2' / 'no2_prior'
 TROPESS_DATA_DIR = STATIC_DATA_DIR / 'tropess'
 TROPESS_STD_DATA_DIR = STATIC_DATA_DIR / 'tropess-daac' / 'standard'
+WRF_DATA_DIR = STATIC_DATA_DIR / 'wrf-chem'
 LA_CUSTOM_RET_EXTENT = [-120.0, -116.0, 32.0, 36.0]
 
 VARIABLES = {
@@ -45,12 +46,14 @@ NEW_VARIABLES = {
     'profile_shape': 'PRODUCT/SUPPORT_DATA/INPUT_DATA/profile_shape',
     'scattering_weights': 'PRODUCT/SUPPORT_DATA/INPUT_DATA/scattering_weights',
     'pres_edges': 'PRODUCT/pressure_edges',
+    'recompute_flags': 'PRODUCT/custom_ret_recompute_flag',
 }
 
 NEW_VARIABLE_DIMENSIONS = {
     'profile_shape': ('time', 'scanline', 'ground_pixel', 'layer'),
     'scattering_weights': ('time', 'scanline', 'ground_pixel', 'layer'),
-    'pres_edges': ('time', 'scanline', 'ground_pixel', 'layer', 'vertices')
+    'pres_edges': ('time', 'scanline', 'ground_pixel', 'layer', 'vertices'),
+    'recompute_flags': ('time', 'scanline', 'ground_pixel'),
 }
 
 VARIABLE_ATTRIBUTE_OVERRIDES = {
@@ -83,6 +86,8 @@ def main():
     elif clargs.plume_method == 'gaussian+aerosol':
         out_subdir = f'{clargs.center_pres:.0f}hPa-by-{clargs.pres_width:.0f}hPa-{clargs.max_ppb:.0f}ppb-{clargs.sw:.2f}sw'
         out_dir = STATIC_DATA_DIR / 'tropomi-custom' / 'gaussian-aerosol' / out_subdir
+    elif clargs.plume_method == 'wrf-chem':
+        out_dir = STATIC_DATA_DIR / 'tropomi-custom' / 'wrf-chem'
     else:
         raise NotImplementedError(f'unspecified --out-dir for plume method "{clargs.plume_method}"')
 
@@ -124,6 +129,8 @@ def main():
                 plume_max_dmf=clargs.max_ppb * 1e-9,
                 sw=clargs.sw
             )
+        elif clargs.plume_method == 'wrf-chem':
+            profile_interp = WrfLatLonPresInterp.from_file()
         else:
             raise NotImplementedError(f'plume method = {clargs.plume_method}')
 
@@ -173,7 +180,15 @@ def parse_args():
     pgauss_aer.add_argument('--sw', required=True, type=float, help='Scattering weight maximum below the plume')
     pgauss_aer.set_defaults(plume_method='gaussian+aerosol')
 
+    pwrf = subp.add_parser('wrf-chem', help='Use WRF-Chem simulated profiles')
+    pwrf.set_defaults(plume_method='wrf-chem')
+
     return p.parse_args()
+
+
+class InterpError(Exception):
+    """Error interpolating the input profiles to TROPOMI pixels
+    """
 
 
 class LatLonPresInterp(ABC):
@@ -511,6 +526,118 @@ class COEnhtoNO2LatLonPresInterp:
         return 'TROPOMI standard prior (reinterpolated) with TROPESS CO posterior enhancement added into the shape assuming a fixed CO:NO2 ratio'
 
 
+class WrfLatLonPresInterp(LatLonPresInterp):
+    """Interpolate WRF data to new coordinates"""
+    def __init__(self, times, lon, lat, pres, values):
+        if times.tz is None:
+            raise TypeError('times must be timezone aware')
+        # Convert to UTC
+        self.time = times.tz_convert('utc').tz_localize(None)
+        self.lon = lon
+        self.lat = lat
+
+        self.pres = pres
+        self.values = values
+
+    @classmethod
+    def from_file(cls, file=WRF_DATA_DIR / 'wrfout_d02_2025-01-07_20_pp'):
+        with Dataset(file) as ds:
+            wrf_time = num2date(ds['XTIME'][:], ds['XTIME'].units, ds['XTIME'].calendar)
+            wrf_time = pd.to_datetime([t.strftime('%Y-%m-%dT%H:%M:%S') for t in wrf_time])
+            wrf_time = wrf_time.tz_localize('utc')
+
+            lon = ds['XLONG'][:]
+            lat = ds['XLAT'][:]
+            pres = ds['pres'][:]
+            # convert from ppm to mol/mol
+            no2 = ds['no2'][:]*1e-6
+        return cls(times=wrf_time, lon=lon, lat=lat, pres=pres, values=no2)
+
+    @classmethod
+    def _find_sw_grid_inds(cls, lon, lat, out_lon, out_lat):
+        dist = jgeo.great_circle_distance(lon, lat, out_lon, out_lat)
+        xlon = lon.ravel()
+        xlat = lat.ravel()
+        dist = dist.ravel()
+        # This is a 1 km simulation, so we should be able to get points within twice that
+        # (allowing for some projection uncertainty)
+        for i in np.argsort(dist):
+            if dist[i] > 2:
+                raise InterpError(f'Could not find grid point to SW of {out_lon} E, {out_lat} N within 2 km (closest point overall was {dist[0]:.2f} km)')
+            if xlon[i] <= out_lon and xlat[i] <= out_lat:
+                return np.unravel_index(i, lon.shape)
+
+
+
+    def __call__(self, out_lon, out_lat, out_pres, out_time, n_nodes=10):
+        # Find the time before out_time, assume that the next model time is after it
+        ibefore = np.flatnonzero(self.time <= out_time)[-1]
+
+        nlev_out = out_pres.size
+        final_profile = np.zeros_like(out_pres)
+
+        model_dt_sec = (self.time[ibefore+1] - self.time[ibefore]).total_seconds()
+        total_time_wt = 0
+
+        for itime in [ibefore, ibefore+1]:
+            dt_sec = np.abs((self.time[itime] - out_time).total_seconds())
+            if dt_sec > 3600:
+                raise RuntimeError(f'One of the closest times to {out_time=} is more than an hour away ({self.time[itime]})')
+            time_wt = 1 - dt_sec / model_dt_sec
+            lon = self.lon[itime]
+            lat = self.lat[itime]
+
+            dist = jgeo.great_circle_distance(lon, lat, out_lon, out_lat)
+            # This is a ~1 km WRF grid, so 3x that spacing should ensure that we
+            # get a good number of points to interpolate from. Allow the real
+            # interpolation code to handle the actual interpolation.
+            ii_dist = np.where(dist < 3.0)
+            ngrid = ii_dist[0].size
+            if ngrid < 4:
+                raise InterpError(f'Need at least 4 grid points to interpolate from, only got {ngrid}')
+
+            coords_in = np.full([ngrid, 2], np.nan)
+            val_in = np.full([ngrid, nlev_out], np.nan)
+
+            i = -1
+            for ilat, ilon in zip(*ii_dist):
+                i += 1
+                p = self.pres[itime, :, ilat, ilon]
+                x = self.values[itime, :, ilat, ilon]
+
+                # Ensure we are pressure sorted so np.interp can extrapolate correctly.
+                ii = np.argsort(p)
+                p = p[ii]
+                x = x[ii]
+
+                # Use numpy interpolation because it does outside fill values as constant
+                # value extrapolation
+                val_in[i] = np.interp(np.log(out_pres), np.log(p), x)
+                coords_in[i,0] = lon[ilat, ilon]
+                coords_in[i,1] = lat[ilat, ilon]
+
+            # Interpolate each level separately now that they are on consistent pressure
+            # levels.
+            for ilev in range(nlev_out):
+                interp = LinearNDInterpolator(coords_in, val_in[:,ilev])
+                final_profile[ilev] += time_wt * interp(out_lon, out_lat)
+            total_time_wt += time_wt
+
+
+
+        if np.any(np.isnan(final_profile)):
+            print(f'Note: interpolation returned NaNs for pixel at {out_lon:.3f} E, {out_lat:.3f} N, should be on the edge')
+            raise InterpError('pixel center is outside edge of the WRF domain')
+
+        # Ensure that we are normalized to 1 for the weight in time
+        final_profile /= total_time_wt
+        return final_profile
+
+
+    def describe(self) -> str:
+        return 'WRF-Chem simulated NO2 profile'
+
+
 
 def load_tropess_profiles(species, date, step=0):
     file = STATIC_DATA_DIR / 'tropess' / f'{date:%Y}' / f'{date:%m}' / f'{date:%d}' / 'L2_Products_Lite' / f'CRIS-JPSS-1_L2-{species}-{step}_{date:%Y_%m_%d}_F02_1.23_Litev01_Day_Night.nc'
@@ -615,15 +742,21 @@ def compute_fire_amf(
     tropomi_pres_edges: np.ndarray,
     tropomi_ak: np.ndarray,
     tropomi_amf_tot: float,
+    tropomi_amf_trop: float,
     tropomi_i_tropopause: int,
     profile_interp: LatLonPresInterp
 ):
-    new_x = compute_pres_weighted_prof(lon=lon, lat=lat, pres_edges=tropomi_pres_edges, time=time, profile_interp=profile_interp)
     tropomi_sw_orig = tropomi_ak * tropomi_amf_tot
-    pres_centers = np.ma.mean(tropomi_pres_edges, axis=1)
-    tropomi_sw = profile_interp.update_scattering_weights(pres_centers, tropomi_sw_orig)
+    try:
+        new_x = compute_pres_weighted_prof(lon=lon, lat=lat, pres_edges=tropomi_pres_edges, time=time, profile_interp=profile_interp)
+    except InterpError:
+        new_x = np.ma.masked_all([tropomi_pres_edges.shape[0]])
+        return tropomi_amf_trop, tropomi_amf_tot, None, tropomi_sw_orig, 1
+    else:
+        pres_centers = np.ma.mean(tropomi_pres_edges, axis=1)
+        tropomi_sw = profile_interp.update_scattering_weights(pres_centers, tropomi_sw_orig)
 
-    fire_amf_tot = np.ma.sum(tropomi_sw * new_x) / np.ma.sum(new_x)
+        fire_amf_tot = np.ma.sum(tropomi_sw * new_x) / np.ma.sum(new_x)
     # The ATBD says the the tropospheric AMF includes the tropopause level.
     # If we assume the index in the file is zero-based, that means that we
     # need to add 1 to work with Python's indexing. FWIW, the CF conventions
@@ -632,7 +765,7 @@ def compute_fire_amf(
     # See sect. 6.4 (pages 35-37)
     i_trop = tropomi_i_tropopause + 1
     fire_amf_trop = np.ma.sum(tropomi_sw[:i_trop] * new_x[:i_trop]) / np.ma.sum(new_x[:i_trop])
-    return fire_amf_trop.item(), fire_amf_tot.item(), new_x, tropomi_sw
+    return fire_amf_trop.item(), fire_amf_tot.item(), new_x, tropomi_sw, 0
 
 
 def compute_fire_l2_no2(tropomi_l2_data: dict, profile_interp: LatLonPresInterp):
@@ -642,19 +775,21 @@ def compute_fire_l2_no2(tropomi_l2_data: dict, profile_interp: LatLonPresInterp)
         'amf_total': np.ma.masked_all_like(tropomi_l2_data['amf_trop']),
         'profile_shape': np.ma.masked_all_like(tropomi_l2_data['ak']),
         'scattering_weights': np.ma.masked_all_like(tropomi_l2_data['ak']),
+        'recompute_flags': np.zeros(tropomi_l2_data['no2_trop'].shape, dtype=np.uint8)
     }
 
     n = tropomi_l2_data['lat'].size
     for i in range(n):
         if i % 250 == 0:
             print(f'Processing {i+1}/{n}')
-        amf_trop_fire, amf_tot_fire, new_prof_shape, s_weights = compute_fire_amf(
+        amf_trop_fire, amf_tot_fire, new_prof_shape, s_weights, recompute_flag = compute_fire_amf(
             lon=tropomi_l2_data['lon'][i],
             lat=tropomi_l2_data['lat'][i],
             time=tropomi_l2_data['time'][i],
             tropomi_pres_edges=tropomi_l2_data['pres_edges'][i],
             tropomi_ak=tropomi_l2_data['ak'][i],
             tropomi_amf_tot=tropomi_l2_data['amf_total'][i],
+            tropomi_amf_trop=tropomi_l2_data['amf_trop'][i],
             tropomi_i_tropopause=tropomi_l2_data['tropopause_index'][i],
             profile_interp=profile_interp
         )
@@ -664,6 +799,7 @@ def compute_fire_l2_no2(tropomi_l2_data: dict, profile_interp: LatLonPresInterp)
         fire_data['profile_shape'][i] = new_prof_shape 
         fire_data['scattering_weights'][i] = s_weights
         fire_data['no2_trop'][i] = tropomi_l2_data['no2_trop'][i] * tropomi_l2_data['amf_trop'][i] / amf_trop_fire
+        fire_data['recompute_flags'][i] = recompute_flag
     print('')
 
     for k, arr in fire_data.items():
