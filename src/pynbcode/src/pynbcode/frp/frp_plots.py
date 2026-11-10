@@ -13,11 +13,10 @@ def make_goes_frp_by_hour_df(goes_provider, scenes, hours=np.arange(8, 18)):
             for subscene in scene['subscene']:
                 subscene_df = goes_provider.daily_frps_for_subscene(scene['name'], subscene, time_lims).copy()
                 dd = (subscene_df.index >= subscene['fire_start']) & (subscene_df.index <= scene['end'])
-                subscene_df = subscene_df.loc[dd, :]
-                subscene_df['scene'] = scene['name']
-                subscene_df['subscene'] = subscene['name']
-                subscene_df['fire_start'] = pd.to_datetime(subscene['fire_start'])
-                dfs.append(subscene_df)
+                subscene_df.loc[dd, 'scene'] = scene['name']
+                subscene_df.loc[dd, 'subscene'] = subscene['name']
+                subscene_df.loc[dd, 'fire_start'] = pd.to_datetime(subscene['fire_start'])
+                dfs.append(subscene_df.loc[dd, :])
 
         hour_dfs[(hours[i], hours[i+1])] = pd.concat(dfs)
 

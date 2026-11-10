@@ -145,11 +145,16 @@ def plot_altadena_structure_perimeter(structure_dmg: gpd.GeoDataFrame, ax=None, 
 def plot_final_perimeter(perimeters_gdf, name, ax=None, **poly_kws):
     if ax is None:
         _, ax = plt.subplots(subplot_kw={'projection': ccrs.PlateCarree()})
-    sub_gdf = perimeters_gdf[perimeters_gdf.name.str.lower() == name.lower()].sort_values('acres', ascending=False)
-    row = sub_gdf.iloc[0:1]
+    row = get_final_perimeter_row(perimeters_gdf, name)
     poly_kws.setdefault('facecolor', 'red')
     poly_kws.setdefault('edgecolor', 'red')
     poly_kws.setdefault('alpha', 0.1)
     row.plot(ax=ax, transform=ccrs.PlateCarree(), **poly_kws)
     rect = Rectangle((0,0), 0, 0, **poly_kws, label=f'{name.capitalize()} fire final perimeter')
     return rect
+
+def get_final_perimeter_row(perimeters_gdf, name):
+    sub_gdf = perimeters_gdf[perimeters_gdf.name.str.lower() == name.lower()]
+    area = sub_gdf['acres'].astype(float)
+    i = area.idxmax()
+    return sub_gdf.loc[i:i]

@@ -82,3 +82,10 @@ def plot_box(loncorn, latcorn, ax=None, **style):
     x = [*loncorn, loncorn[0]]
     y = [*latcorn, latcorn[0]]
     ax.plot(x, y, **style)
+
+
+def plot_extents_box(extents, ax=None, **style):
+    x1, x2, y1, y2 = extents
+    loncorn = [x1, x1, x2, x2]
+    latcorn = [y1, y2, y2, y1]
+    plot_box(loncorn, latcorn, ax=ax, **style)

@@ -505,15 +505,21 @@ class BackgroundErProvider(ErProvider):
         return cls(nc_file, enh_group, min_co_enh=min_co_enh)
 
 
-def match_frps_to_ers(frp: FrpMultiSceneProvider, er: ErMultiSceneProvider, scene_name: str, subscene: dict, local_hour_limits: Tuple[float, float], tz='-08:00') -> pd.DataFrame:
+def match_frps_to_ers(frp: FrpMultiSceneProvider, er: ErMultiSceneProvider, scene_name: str, subscene: dict, local_hour_limits: Tuple[float, float],
+                      tz='-08:00', to_mmol_mol: bool = False) -> pd.DataFrame:
     """Load daily FRP and ER values from their respective providers for one subscene and match the two datasets by date.
     """
     frp_df = frp.daily_frps_for_subscene(scene_name=scene_name, subscene=subscene, local_hour_limits=local_hour_limits, tz=tz)
     er_df = er.daily_ers_for_subscene(scene_name=scene_name, subscene=subscene, tz=tz)
-    return pd.merge(frp_df, er_df, left_index=True, right_index=True)
+    df = pd.merge(frp_df, er_df, left_index=True, right_index=True)
+    if to_mmol_mol:
+        df['er'] *= 1e3
+        df['er_unc'] *= 1e3
+    return df
 
 
-def match_frps_to_ers_many_files(frp: FrpMultiSceneProvider, er: ErMultiSceneProvider, scenes: Sequence[dict], local_hour_limits: Tuple[float, float], tz='-08:00') -> pd.DataFrame:
+def match_frps_to_ers_many_files(frp: FrpMultiSceneProvider, er: ErMultiSceneProvider, scenes: Sequence[dict], local_hour_limits: Tuple[float, float],
+                                 tz='-08:00', to_mmol_mol: bool = False) -> pd.DataFrame:
     """Load daily FRP and ER values from their respective providers, match by date, and concatenate multiple subscenes' data into a single dataframe.
 
     Parameters
@@ -545,7 +551,7 @@ def match_frps_to_ers_many_files(frp: FrpMultiSceneProvider, er: ErMultiScenePro
     for iscene, scene in enumerate(scenes, start=1):
         logger.debug(f'Matching for scene {iscene} of {nscene}: {scene["name"]}')
         for subscene in scene['subscene']:
-            subscene_df = match_frps_to_ers(frp, er, scene_name=scene['name'], subscene=subscene, local_hour_limits=local_hour_limits, tz=tz)
+            subscene_df = match_frps_to_ers(frp, er, scene_name=scene['name'], subscene=subscene, local_hour_limits=local_hour_limits, tz=tz, to_mmol_mol=to_mmol_mol)
             # Since we have VIIRS for 2020 and 2021 fire seasons without any differentiation by scene, we want to be sure that
             # the analysis covers the right period. We will have data before the fire start for the time backgrounding.
             # The end date check may be redundant since the ER data should usually end when the scene does, but better
