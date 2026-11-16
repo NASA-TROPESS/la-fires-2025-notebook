@@ -14,9 +14,10 @@ include("Enhancements.jl")
 
 include("Plots.jl")
 
-function end2end_driver(config_file, full_recheck=false, force_rerun=false, debug_level=0)
+function end2end_driver(config_file, full_recheck=false, force_rerun=false, make_plots=false, debug_level=0)
     pyssd = pyimport("sat_scene_download")
     cfg = load_config_file(config_file)
+    @info "Loaded configuration file $config_file"
     pyssd.download_driver(cfg, full_recheck=full_recheck, force_redownload=force_rerun)
 
     l2_dir = cfg["files"]["l2_dir"]
@@ -68,12 +69,13 @@ function end2end_driver(config_file, full_recheck=false, force_rerun=false, debu
     end
 
 
-
-    auto_plotting.plot_gridded_files(
-        cfg["scene"],
-        grid_dir,
-        plot_dir,
-    )
+    if make_plots
+        auto_plotting.plot_gridded_files(
+            cfg["scene"],
+            grid_dir,
+            plot_dir,
+        )
+    end
 end
 
 function load_config_file(config_file)

@@ -80,6 +80,7 @@ function summarize_goes_fire_data(json_file, output_file; extent=nothing)
         end
 
         if success
+            @debug " -> Reading $file"
             if isnothing(out_dict)
                 out_dict = init_goes_fire_summary_dict(data, n, length(lat))
             end

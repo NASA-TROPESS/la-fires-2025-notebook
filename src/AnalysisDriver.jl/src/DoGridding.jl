@@ -88,6 +88,7 @@ function grid_scene_from_config(; scene_dict, l2_dir, grid_dir, subdir, grid_con
 end
 
 function grid_scene(; quantity, l2_json_file, output_template, config, grid_res=0.025, grouping_fxn=group_tropomi_files_by_start_date, debug_level=0)
+    @info "Reading JSON file: $l2_json_file"
     l2_scene_info = JSON3.parsefile(l2_json_file)
     l2_files_by_date = grouping_fxn(l2_scene_info[:files], dirname(l2_json_file))
     grid_latlim, grid_lonlim = grid_def_from_scene(l2_scene_info[:scene], grid_res)
