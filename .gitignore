@@ -4,3 +4,6 @@
 env/.CondaPkg/
 *.ipynb
 !EST LA Fires.ipynb
+# pixi environments
+.pixi/*
+!.pixi/config.toml
