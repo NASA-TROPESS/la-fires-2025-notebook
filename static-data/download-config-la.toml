@@ -1,17 +1,51 @@
 [files]
-l2_dir = "tropess-daac/"
+l2_dir = "tropomi/l2/"
+grid_dir = "tropomi/gridded/"
+plot_dir = "tropomi/plots/"
+enhancement_dir = "tropomi/enhancements/"
+goes_summary_dir = "goes"
 
 [defaults]
 box_width = 10.0
 
-[products.standard]
+[products.no2]
+# Must specify version, or we get both the v1 and v2 NO2 products
 provider = "earthaccess"
-filters = { short_name = "TRPSDL2ALLCRS1MGLOS", version = "2" }
+filters = { short_name = "S5P_L2__NO2____HiR", version = "2" }
 
 
-[products.summary]
+[products.co]
+# Must specify version, or we get both the v1 and v2 CO products,
+# and v1 doesn't include the a priori
 provider = "earthaccess"
-filters = { short_name = "TRPSYL2ALLCRS1MGLOS", version = "2" }
+filters = { short_name = "S5P_L2__CO_____HiR", version = "2" }
+
+[products.alh]
+provider = "earthaccess"
+filters = { short_name = "S5P_L2__AER_LH_HiR", version = "2" }
+
+[products.aer]
+provider = "earthaccess"
+filters = { short_name = "TROPOMAER", version = "1" }
+
+[products.no2_prior]
+provider = "tropomi-priors-eodata"
+filters = { Prefix = "Sentinel-5P/AUX/AUX_CTMANA/{date:%Y}/{date:%m}/{date:%d}/" }
+subset_vars = ["lon", "lat", "date", "hyam", "hyai", "hybm", "hybi", "ps", "no2"]
+
+
+[products.goes_fire]
+provider = "goes-s3fs-multi"
+required = false
+
+[[products.goes_fire.hour_path_templates]]
+start = "2018-08-27"
+stop = "2023-01-04"
+pattern = "noaa-goes17/ABI-L2-FDCC/{date:%Y}/{date:%j}/{date:%H}/"
+
+[[products.goes_fire.hour_path_templates]]
+start = "2023-01-04"
+pattern = "noaa-goes18/ABI-L2-FDCC/{date:%Y}/{date:%j}/{date:%H}/"
 
 [[scene]]
 name = 'eaton_and_palisades'
